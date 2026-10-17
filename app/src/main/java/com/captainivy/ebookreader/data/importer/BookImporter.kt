@@ -107,7 +107,13 @@ class BookImporter(
         val bytes = archive.readBytes(coverHref) ?: return null
         val bitmap = Bitmaps.decodeSampled(bytes, 400, 600) ?: return null
         val file = repository.storage().newCoverFile()
-        return if (Bitmaps.savePng(bitmap, file)) file.absolutePath else null
+        val saved = try {
+            Bitmaps.savePng(bitmap, file)
+        } finally {
+            // 及时回收，避免批量导入时位图堆积占用内存
+            bitmap.recycle()
+        }
+        return if (saved) file.absolutePath else null
     }
 
     private fun flattenToc(entries: List<TocEntry>): List<TocItem> {

@@ -126,7 +126,8 @@ class EpubParser {
         while (event != XmlPullParser.END_DOCUMENT) {
             when (event) {
                 XmlPullParser.START_TAG -> {
-                    val name = parser.name
+                    // 命名空间未开启，标签名可能带前缀（如 opf:metadata、dc:title），统一去掉前缀
+                    val name = parser.name.substringAfterLast(':')
                     when (name) {
                         "metadata" -> inMetadata = true
                         "manifest" -> inManifest = true
@@ -160,19 +161,12 @@ class EpubParser {
                                 guideCoverHref = parser.getAttributeValue(null, "href")
                             }
                         }
-                        else -> if (inMetadata) {
-                            when {
-                                name == "title" || name.endsWith(":title") ->
-                                    title = parser.nextText().trim()
-                                name == "creator" || name.endsWith(":creator") ->
-                                    author = parser.nextText().trim()
-                                name == "language" || name.endsWith(":language") ->
-                                    language = parser.nextText().trim()
-                            }
-                        }
+                        "title" -> if (inMetadata) title = parser.nextText().trim()
+                        "creator" -> if (inMetadata) author = parser.nextText().trim()
+                        "language" -> if (inMetadata) language = parser.nextText().trim()
                     }
                 }
-                XmlPullParser.END_TAG -> when (parser.name) {
+                XmlPullParser.END_TAG -> when (parser.name.substringAfterLast(':')) {
                     "metadata" -> inMetadata = false
                     "manifest" -> inManifest = false
                     "spine" -> inSpine = false

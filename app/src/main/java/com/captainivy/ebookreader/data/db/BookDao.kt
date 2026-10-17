@@ -86,9 +86,11 @@ class BookDao(private val helper: AppDatabase) {
         val args = ids.map { it.toString() }.toTypedArray()
         database.beginTransaction()
         try {
-            for (table in listOf(Chapters.TABLE, Toc.TABLE, Stats.TABLE, Books.TABLE)) {
-                database.delete(table, "${DbContract.Books.ID} IN ($placeholders)", args)
-            }
+            // 子表通过 book_id 关联删除（不能误用各表自身的 _id）
+            database.delete(Chapters.TABLE, "${Chapters.BOOK_ID} IN ($placeholders)", args)
+            database.delete(Toc.TABLE, "${Toc.BOOK_ID} IN ($placeholders)", args)
+            database.delete(Stats.TABLE, "${Stats.BOOK_ID} IN ($placeholders)", args)
+            database.delete(Books.TABLE, "${Books.ID} IN ($placeholders)", args)
             database.setTransactionSuccessful()
         } finally {
             database.endTransaction()

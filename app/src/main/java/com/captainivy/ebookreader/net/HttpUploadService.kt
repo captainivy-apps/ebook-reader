@@ -17,7 +17,7 @@ import com.captainivy.ebookreader.ui.settings.SettingsActivity
 import com.captainivy.ebookreader.util.NetworkUtils
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
-import java.io.ByteArrayInputStream
+import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
@@ -111,9 +111,7 @@ class HttpUploadService : Service() {
             }
         }
 
-        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
         val contentType = headers["content-type"].orEmpty()
-        val body = if (contentLength > 0) readExact(input, contentLength) else ByteArray(0)
 
         val output = socket.getOutputStream()
         when {
@@ -121,104 +119,51 @@ class HttpUploadService : Service() {
                 respondHtml(output, uploadPage())
             }
             method == "POST" && path == "/upload" -> {
-                val result = handleUpload(contentType, body)
+                val result = handleUpload(contentType, input)
                 respondHtml(output, result)
             }
             else -> respond(output, "404 Not Found", "text/plain; charset=utf-8", "Not Found")
         }
     }
 
-    private fun handleUpload(contentType: String, body: ByteArray): String {
+    /**
+     * 流式解析上传内容并逐本导入：不再把整个请求体读入内存，
+     * 每个文件字段直接写入临时文件后再导入，避免大量/大体积 EPUB 上传时 OOM。
+     */
+    private fun handleUpload(contentType: String, input: InputStream): String {
         val boundary = contentType
             .substringAfter("boundary=", "")
             .trim()
             .trim('"')
-        if (boundary.isEmpty() || body.isEmpty()) {
-            return resultPage(listOf(), "上传内容为空")
-        }
-        val files = parseMultipart(body, boundary)
-        if (files.isEmpty()) return resultPage(listOf(), "未找到文件字段")
+        if (boundary.isEmpty()) return resultPage(listOf(), "上传内容为空")
 
         val importer = BookImporter(this, App.get().repository)
         val imported = ArrayList<String>()
         val failed = ArrayList<String>()
-        for ((name, bytes) in files) {
-            if (bytes.isEmpty()) continue
-            try {
-                runBlocking {
-                    importer.importStream(ByteArrayInputStream(bytes), name)
+        var foundAny = false
+
+        try {
+            MultipartStreamReader(input, boundary, cacheDir).readFiles { name, file ->
+                foundAny = true
+                val display = name?.takeIf { it.isNotBlank() } ?: "未命名"
+                try {
+                    FileInputStream(file).use { fis ->
+                        runBlocking { importer.importStream(fis, name) }
+                    }
+                    imported.add(display)
+                } catch (e: Exception) {
+                    failed.add("$display（${e.message}）")
+                } finally {
+                    file.delete()
                 }
-                imported.add(name.ifBlank { "未命名" })
-            } catch (e: Exception) {
-                failed.add("${name.ifBlank { "未命名" }}（${e.message}）")
             }
+        } catch (e: Exception) {
+            failed.add(e.message ?: "解析上传内容失败")
         }
+
+        if (!foundAny) return resultPage(listOf(), "未找到文件字段")
         return resultPage(imported, failed.joinToString("；"))
     }
-
-    private fun parseMultipart(body: ByteArray, boundary: String): List<Pair<String, ByteArray>> {
-        val bodyStr = String(body, Charsets.ISO_8859_1)
-        val delimiter = "--$boundary"
-        val result = ArrayList<Pair<String, ByteArray>>()
-        val segments = bodyStr.split(delimiter)
-        for (raw in segments) {
-            var seg = raw
-            if (seg.startsWith("--")) break
-            seg = seg.removePrefix("\r\n")
-            val headerEnd = seg.indexOf("\r\n\r\n")
-            if (headerEnd < 0) continue
-            val headerText = seg.substring(0, headerEnd)
-            var data = seg.substring(headerEnd + 4)
-            if (data.endsWith("\r\n")) data = data.substring(0, data.length - 2)
-            val filename = parseFilename(headerText)
-            if (filename.isNullOrEmpty()) continue
-            result.add(basename(filename) to data.toByteArray(Charsets.ISO_8859_1))
-        }
-        return result
-    }
-
-    /**
-     * 解析 Content-Disposition 中的文件名，避免中文乱码：
-     * 1) 优先使用 RFC 5987 的 `filename*=UTF-8''%E4%B8%AD...`；
-     * 2) 否则兼容浏览器直接写入的 UTF-8 原始字节（body 按 ISO-8859-1 读取会变成乱码，这里还原）。
-     */
-    private fun parseFilename(headerText: String): String? {
-        val extended = EXTENDED_FILENAME.find(headerText)?.groupValues?.get(1)?.trim()?.trim('"')
-        if (!extended.isNullOrEmpty()) {
-            val value = if (extended.contains("''")) extended.substringAfter("''") else extended
-            return percentDecode(value)
-        }
-        val plain = PLAIN_FILENAME.find(headerText)?.groupValues?.get(1) ?: return null
-        if (plain.isEmpty()) return null
-        return try {
-            String(plain.toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8)
-        } catch (_: Exception) {
-            plain
-        }
-    }
-
-    /** 仅解码百分号转义（不把 '+' 当作空格，避免破坏文件名） */
-    private fun percentDecode(value: String): String {
-        val out = java.io.ByteArrayOutputStream()
-        var i = 0
-        while (i < value.length) {
-            val c = value[i]
-            if (c == '%' && i + 2 < value.length) {
-                val hex = value.substring(i + 1, i + 3).toIntOrNull(16)
-                if (hex != null) {
-                    out.write(hex)
-                    i += 3
-                    continue
-                }
-            }
-            out.write(c.code and 0xFF)
-            i++
-        }
-        return String(out.toByteArray(), Charsets.UTF_8)
-    }
-
-    private fun basename(path: String): String =
-        path.substringAfterLast('/').substringAfterLast('\\')
 
     // ------------------------------------------------------------- http utils
 
@@ -231,17 +176,6 @@ class HttpUploadService : Service() {
             if (b != '\r'.code) sb.append(b.toChar())
         }
         return sb.toString()
-    }
-
-    private fun readExact(input: InputStream, length: Int): ByteArray {
-        val data = ByteArray(length)
-        var read = 0
-        while (read < length) {
-            val n = input.read(data, read, length - read)
-            if (n < 0) break
-            read += n
-        }
-        return if (read == length) data else data.copyOf(read)
     }
 
     private fun respond(
@@ -355,10 +289,6 @@ class HttpUploadService : Service() {
         const val EXTRA_PORT = "port"
         private const val CHANNEL_ID = "http_upload"
         private const val NOTIF_ID = 1001
-        private val PLAIN_FILENAME =
-            Regex("filename\\s*=\\s*\"([^\"]*)\"", RegexOption.IGNORE_CASE)
-        private val EXTENDED_FILENAME =
-            Regex("filename\\*\\s*=\\s*([^;\\r\\n]+)", RegexOption.IGNORE_CASE)
 
         fun start(context: Context, port: Int) {
             val intent = Intent(context, HttpUploadService::class.java).apply {

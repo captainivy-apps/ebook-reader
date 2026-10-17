@@ -87,6 +87,9 @@ class LibraryActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_refresh -> {
+            reload(); true
+        }
         R.id.action_view -> {
             prefs.libraryGrid = !prefs.libraryGrid
             applyViewMode()
