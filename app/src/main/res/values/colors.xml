@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="paper">#F5F1E6</color>
+    <color name="paper_dark">#F2EFE7</color>
+    <color name="bar">#F7F4EC</color>
+    <color name="primary">#7A8B6F</color>
+    <color name="primary_dark">#5E6E54</color>
+    <color name="text_primary">#24211C</color>
+    <color name="text_secondary">#8A857A</color>
+    <color name="danger">#D9534F</color>
+    <color name="white">#FFFFFF</color>
+</resources>

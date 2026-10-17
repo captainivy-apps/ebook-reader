@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">电子书阅读器</string>
+
+    <!-- 通用 -->
+    <string name="delete">删除</string>
+    <string name="cancel">取消</string>
+    <string name="settings">设置</string>
+    <string name="cover">封面</string>
+
+    <!-- 书库 -->
+    <string name="library_title">书库</string>
+    <string name="library_empty">书库为空，点击右下角 + 导入 EPUB</string>
+    <string name="import_book">导入书籍</string>
+    <string name="import_success">导入成功</string>
+    <string name="sort">排序</string>
+    <string name="library_view_cover">封面模式</string>
+    <string name="library_view_list">列表模式</string>
+    <string name="sort_recent_desc">最近阅读（新 → 旧）</string>
+    <string name="sort_recent_asc">最近阅读（旧 → 新）</string>
+    <string name="sort_added_desc">导入时间（新 → 旧）</string>
+    <string name="sort_added_asc">导入时间（旧 → 新）</string>
+    <string name="select_all">全选</string>
+    <string name="selection_count">已选择 %1$d 项</string>
+    <string name="delete_confirm_title">删除书籍</string>
+    <string name="delete_confirm_message">确定删除《%1$s》吗？文件也将被移除。</string>
+    <string name="delete_selected_message">确定删除选中的 %1$d 本书吗？</string>
+
+    <!-- 阅读器 -->
+    <string name="back_to_library">返回书库</string>
+    <string name="book_meta">书籍信息</string>
+    <string name="menu_toc">目录</string>
+    <string name="menu_brightness">亮度</string>
+    <string name="menu_typography">排版</string>
+    <string name="toc_empty">本书没有目录信息</string>
+    <string name="note_title">注释</string>
+    <string name="note_not_found">未找到注释内容</string>
+    <string name="brightness_hint">拖动滑块调节屏幕亮度</string>
+    <string name="typo_font">字体</string>
+    <string name="typo_font_size">字号</string>
+    <string name="typo_line_spacing">行间距</string>
+    <string name="typo_margin">左右边距</string>
+    <string name="typo_indent_first_line">首行缩进</string>
+    <string name="typo_justify">两端对齐</string>
+    <string name="font_default">默认字体</string>
+    <string name="font_serif">衬线（宋体）</string>
+    <string name="font_sans">无衬线（黑体）</string>
+    <string name="font_mono">等宽字体</string>
+
+    <!-- 设置 -->
+    <string name="settings_http_section">局域网上传</string>
+    <string name="settings_http_enable">开启 HTTP 局域网上传</string>
+    <string name="settings_http_port">端口</string>
+    <string name="settings_http_hint">在同一局域网的电脑浏览器中打开以上地址上传 EPUB</string>
+    <string name="settings_http_disabled">未开启</string>
+    <string name="settings_reading_section">阅读</string>
+    <string name="settings_left_hand_mode">左手持有模式</string>
+    <string name="settings_left_hand_mode_hint">开启后翻转左右翻页区域：点击阅读区左侧翻到下一页，点击右侧翻到上一页</string>
+    <string name="settings_keyboard_section">键盘翻页</string>
+    <string name="settings_keyboard_hint">连接键盘后可使用以下按键翻页：\n· 右方向键 / 下方向键：向前翻页\n· 左方向键 / 上方向键：向后翻页\n· 空格：向前翻页\n· Alt + 空格：向后翻页</string>
+    <string name="settings_font_section">字体</string>
+    <string name="settings_font_download">下载字体</string>
+    <string name="settings_font_import">导入本地字体</string>
+    <string name="font_count">已安装 %1$d 个下载字体</string>
+    <string name="font_downloaded">（已下载）</string>
+    <string name="font_not_downloaded">（未下载）</string>
+    <string name="font_delete_title">删除字体</string>
+    <string name="font_delete_message">确定删除字体 %1$s 吗？</string>
+    <string name="font_downloading">正在下载：%1$s</string>
+    <string name="font_download_success">字体下载完成</string>
+    <string name="font_import_success">字体导入完成</string>
+    <string name="port_invalid">端口无效，请输入 1024-65535</string>
+    <string name="notification_denied">未授予通知权限，上传服务可能无法稳定运行</string>
+
+    <string name="settings_stats_section">阅读统计</string>
+    <string name="settings_stats_recent">最近阅读</string>
+    <string name="settings_stats_top">读得最多的书</string>
+    <string name="stats_summary">共 %1$d 本书</string>
+    <string name="stats_total_time">总阅读时长：%1$s</string>
+    <string name="stats_total_chars">累计阅读字数：%1$d</string>
+    <string name="stats_none">暂无数据</string>
+
+    <!-- 上传服务 -->
+    <string name="upload_channel_name">上传服务</string>
+    <string name="upload_notification_title">局域网上传服务运行中</string>
+</resources>
