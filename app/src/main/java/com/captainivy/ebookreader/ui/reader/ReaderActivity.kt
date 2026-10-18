@@ -24,6 +24,9 @@ import com.captainivy.ebookreader.data.epub.ChapterContentParser
 import com.captainivy.ebookreader.data.epub.EpubArchive
 import com.captainivy.ebookreader.data.epub.ImageLoader
 import com.captainivy.ebookreader.data.epub.NoteResolver
+import com.captainivy.ebookreader.data.epub.Block
+import com.captainivy.ebookreader.data.epub.TextBlock
+import com.captainivy.ebookreader.data.epub.TextStyle
 import com.captainivy.ebookreader.data.model.Book
 import com.captainivy.ebookreader.data.model.Chapter
 import com.captainivy.ebookreader.data.model.TocItem
@@ -288,8 +291,9 @@ class ReaderActivity : AppCompatActivity() {
             }
             if (!isActive) return@launch
             val cfg = layoutConfig(w, h)
+            val blocks = withChapterTitle(content.blocks, chapter.title)
             val newLayout = withContext(Dispatchers.Default) {
-                paginator.paginate(content.blocks, cfg)
+                paginator.paginate(blocks, cfg)
             }
             if (!isActive) return@launch
             val anchorOffset = anchor?.let { content.anchors[it] }
@@ -306,6 +310,33 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun reloadChapter(index: Int, offset: Int, pageTurn: Boolean) {
         showChapter(index, offset, pageTurn)
+    }
+
+    /**
+     * 让正文里的章节标题用更大的字号显示。
+     *
+     * 很多 EPUB（尤其中文书）把章节标题写成普通段落，排版后与正文字号无异。
+     * 这里把章节开头的第一个文本块识别为标题时，提升为标题样式（H2：更大字号、加粗、居中）。
+     * 仅替换样式、不改变文本长度，因此不影响阅读位置与进度的偏移映射。
+     */
+    private fun withChapterTitle(blocks: List<Block>, title: String): List<Block> {
+        if (title.isBlank()) return blocks
+        val idx = blocks.indexOfFirst { it is TextBlock }
+        if (idx < 0) return blocks
+        val first = blocks[idx] as TextBlock
+        if (first.style in HEADING_STYLES) return blocks
+        if (!titleMatches(first.text, title)) return blocks
+        val promoted = TextBlock(first.text, TextStyle.H2, first.align)
+        return blocks.toMutableList().also { it[idx] = promoted }
+    }
+
+    /** 判断章节首个文本块是否为标题：忽略空白后相互包含，且长度相近（避免误判正文首段） */
+    private fun titleMatches(text: CharSequence, title: String): Boolean {
+        val a = text.toString().filterNot { it.isWhitespace() }
+        val b = title.filterNot { it.isWhitespace() }
+        if (a.length < 2 || b.length < 2) return false
+        if (a.length > b.length + 12) return false
+        return a == b || a.contains(b) || b.contains(a)
     }
 
     private fun render(pageTurn: Boolean) {
@@ -681,6 +712,11 @@ class ReaderActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_BOOK_ID = "book_id"
         private const val TYPO_PREVIEW_DEBOUNCE_MS = 80L
+
+        private val HEADING_STYLES = setOf(
+            TextStyle.H1, TextStyle.H2, TextStyle.H3,
+            TextStyle.H4, TextStyle.H5, TextStyle.H6
+        )
 
         fun newIntent(context: Context, bookId: Long): Intent =
             Intent(context, ReaderActivity::class.java).putExtra(EXTRA_BOOK_ID, bookId)
