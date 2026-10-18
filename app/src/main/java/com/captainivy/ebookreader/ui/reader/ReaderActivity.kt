@@ -3,6 +3,7 @@ package com.captainivy.ebookreader.ui.reader
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -69,6 +70,23 @@ class ReaderActivity : AppCompatActivity() {
     private var page = 0
     private var barsVisible = false
     private var loadJob: Job? = null
+    private var prefetchJob: Job? = null
+
+    /** 章节排版缓存（含预排版的下一章），键为章节序号 */
+    private var cacheSignature = ""
+    private val chapterCache = object : LinkedHashMap<Int, CachedChapter>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, CachedChapter>): Boolean =
+            size > MAX_CACHED_CHAPTERS
+    }
+
+    private class CachedChapter(
+        val signature: String,
+        val layout: ChapterLayout,
+        val anchors: Map<String, Int>
+    )
+
+    /** 翻页后到面板刷新完成前的输入锁定截止时间（仅墨水屏生效），避免刷新请求排队造成闪烁 */
+    private var settleUntilMs = 0L
 
     private var bookReady = false
     private var pendingChapter = 0
@@ -93,6 +111,8 @@ class ReaderActivity : AppCompatActivity() {
 
         applyReaderPadding()
         applyLeftHandIndicator()
+        einkRefresh.attach(this)
+        binding.readerView.setDeviceLabel(einkRefresh.deviceSummary())
         binding.readerView.onTapListener = ::onTap
         binding.readerView.onNoteTapListener = ::onNoteTap
         binding.readerView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> onViewLayout() }
@@ -117,6 +137,8 @@ class ReaderActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         loadJob?.cancel()
+        prefetchJob?.cancel()
+        chapterCache.clear()
         archive?.close()
         archive = null
     }
@@ -271,32 +293,12 @@ class ReaderActivity : AppCompatActivity() {
             pendingOffset = offset
             return
         }
-        val chapter = chapters[index]
         loadJob?.cancel()
         loadJob = lifecycleScope.launch {
-            val content = withContext(Dispatchers.IO) {
-                val html = try {
-                    archive?.readText(chapter.href).orEmpty()
-                } catch (_: Exception) {
-                    ""
-                }
-                val loader = ImageLoader { href ->
-                    try {
-                        archive?.readBytes(href)?.let { Bitmaps.decodeSampled(it, w, h) }
-                    } catch (_: Exception) {
-                        null
-                    }
-                }
-                contentParser.parse(html, chapter.href, loader, w)
-            }
+            val cached = loadChapter(index, w, h) ?: return@launch
             if (!isActive) return@launch
-            val cfg = layoutConfig(w, h)
-            val blocks = withChapterTitle(content.blocks, chapter.title)
-            val newLayout = withContext(Dispatchers.Default) {
-                paginator.paginate(blocks, cfg)
-            }
-            if (!isActive) return@launch
-            val anchorOffset = anchor?.let { content.anchors[it] }
+            val newLayout = cached.layout
+            val anchorOffset = anchor?.let { cached.anchors[it] }
             chapterIndex = index
             layout = newLayout
             page = when {
@@ -305,8 +307,63 @@ class ReaderActivity : AppCompatActivity() {
                 else -> newLayout.pageForOffset(offset)
             }
             render(pageTurn)
+            prefetchChapter(index + 1, w, h)
         }
     }
+
+    /** 解析并排版一章；命中缓存则直接返回。越界返回 null。 */
+    private suspend fun loadChapter(index: Int, w: Int, h: Int): CachedChapter? {
+        if (index < 0 || index >= chapters.size) return null
+        val sig = layoutSignature(w, h)
+        if (sig != cacheSignature) {
+            chapterCache.clear()
+            cacheSignature = sig
+        }
+        chapterCache[index]?.let { return it }
+        val chapter = chapters[index]
+        val content = withContext(Dispatchers.IO) {
+            val html = try {
+                archive?.readText(chapter.href).orEmpty()
+            } catch (_: Exception) {
+                ""
+            }
+            val loader = ImageLoader { href ->
+                try {
+                    archive?.readBytes(href)?.let { Bitmaps.decodeSampled(it, w, h) }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            contentParser.parse(html, chapter.href, loader, w)
+        }
+        val cfg = layoutConfig(w, h)
+        val blocks = withChapterTitle(content.blocks, chapter.title)
+        val newLayout = withContext(Dispatchers.Default) {
+            paginator.paginate(blocks, cfg)
+        }
+        val cached = CachedChapter(sig, newLayout, content.anchors)
+        chapterCache[index] = cached
+        return cached
+    }
+
+    /** 预排版下一章，翻到该章时直接命中缓存，消除加载空白帧与额外刷新。 */
+    private fun prefetchChapter(index: Int, w: Int, h: Int) {
+        if (index < 0 || index >= chapters.size) return
+        val sig = layoutSignature(w, h)
+        if (chapterCache[index]?.signature == sig) return
+        prefetchJob?.cancel()
+        prefetchJob = lifecycleScope.launch {
+            try {
+                loadChapter(index, w, h)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** 当前排版配置签名：任一排版参数变化都会使缓存失效 */
+    private fun layoutSignature(w: Int, h: Int): String =
+        "$w|$h|${prefs.fontFamily}|${prefs.fontSizeSp}|${prefs.lineSpacing}|" +
+            "${prefs.indentFirstLine}|${prefs.justify}"
 
     private fun reloadChapter(index: Int, offset: Int, pageTurn: Boolean) {
         showChapter(index, offset, pageTurn)
@@ -345,18 +402,30 @@ class ReaderActivity : AppCompatActivity() {
         val title = chapters.getOrNull(chapterIndex)?.title.orEmpty()
         binding.readerView.showPage(l, page, title, progressText(off))
         updateSessionOffset(off)
-        if (pageTurn) maybeClearGhosting()
+        if (pageTurn) {
+            val full = maybeClearGhosting()
+            if (einkRefresh.available) {
+                settleUntilMs = SystemClock.uptimeMillis() +
+                    if (full) FULL_SETTLE_MS else FAST_SETTLE_MS
+            }
+        }
     }
 
     /**
      * 翻页后按节奏清除残影：每 [Prefs.refreshInterval] 次翻页请求一次厂商全屏清刷。
-     * 非墨水屏或厂商接口不可用时静默跳过。
+     * 返回本次是否触发了全屏清刷。非墨水屏或厂商接口不可用时静默跳过。
      */
-    private fun maybeClearGhosting() {
+    private fun maybeClearGhosting(): Boolean {
         if (einkRefresh.available && refreshCadence.onPageTurn()) {
             einkRefresh.fullRefresh(binding.readerView)
+            return true
         }
+        return false
     }
+
+    /** 墨水屏面板刷新期间忽略新的翻页输入，避免刷新请求排队导致连续闪动 */
+    private fun isSettling(): Boolean =
+        einkRefresh.available && SystemClock.uptimeMillis() < settleUntilMs
 
     private fun currentOffset(): Int = layout?.offsetForPage(page) ?: 0
 
@@ -397,6 +466,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun nextPage() {
+        if (isSettling()) return
         val l = layout ?: return
         if (page < l.pageCount - 1) {
             page++
@@ -407,6 +477,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun prevPage() {
+        if (isSettling()) return
         if (page > 0) {
             page--
             render(true)
@@ -450,6 +521,14 @@ class ReaderActivity : AppCompatActivity() {
 
     // --------------------------------------------------------------- dialogs
 
+    /** 墨水屏设备禁用弹窗动画，避免过渡动画产生多余的局部刷新与残影；普通设备不变。 */
+    private fun AlertDialog.Builder.showForEink(): AlertDialog {
+        val dialog = create()
+        if (einkRefresh.available) dialog.window?.setWindowAnimations(0)
+        dialog.show()
+        return dialog
+    }
+
     private fun showMetaDialog() {
         val b = book ?: return
         val sizeMb = String.format(Locale.US, "%.2f MB", b.fileSize / 1024f / 1024f)
@@ -465,7 +544,7 @@ class ReaderActivity : AppCompatActivity() {
             .setTitle(R.string.book_meta)
             .setMessage(msg)
             .setPositiveButton(android.R.string.ok, null)
-            .show()
+            .showForEink()
     }
 
     private fun showTocDialog() {
@@ -474,7 +553,7 @@ class ReaderActivity : AppCompatActivity() {
                 .setTitle(R.string.menu_toc)
                 .setMessage(R.string.toc_empty)
                 .setPositiveButton(android.R.string.ok, null)
-                .show()
+                .showForEink()
             return
         }
         val adapter = TocAdapter(this, tocItems, chapterIndex)
@@ -487,7 +566,7 @@ class ReaderActivity : AppCompatActivity() {
                 hideBars()
             }
             .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            .showForEink()
     }
 
     /** 点击脚注/尾注上标：解析注释内容并弹窗展示 */
@@ -525,7 +604,7 @@ class ReaderActivity : AppCompatActivity() {
             .setTitle(R.string.note_title)
             .setView(scroll)
             .setPositiveButton(android.R.string.ok, null)
-            .show()
+            .showForEink()
     }
 
     private fun showBrightnessDialog() {
@@ -546,7 +625,7 @@ class ReaderActivity : AppCompatActivity() {
             .setTitle(R.string.menu_brightness)
             .setView(view)
             .setPositiveButton(android.R.string.ok, null)
-            .show()
+            .showForEink()
     }
 
     private fun showTypographyDialog() {
@@ -628,6 +707,8 @@ class ReaderActivity : AppCompatActivity() {
                 setGravity(Gravity.BOTTOM)
             }
         }
+        // 墨水屏禁用弹窗滑动动画，避免过渡帧造成额外刷新
+        if (einkRefresh.available) dialog.window?.setWindowAnimations(0)
         dialog.show()
     }
 
@@ -712,6 +793,14 @@ class ReaderActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_BOOK_ID = "book_id"
         private const val TYPO_PREVIEW_DEBOUNCE_MS = 80L
+
+        /** 墨水屏快刷（无全刷）时翻页后的输入锁定时间 */
+        private const val FAST_SETTLE_MS = 220L
+
+        /** 触发全屏清刷时更长的输入锁定时间，等待清刷波形完成 */
+        private const val FULL_SETTLE_MS = 700L
+
+        private const val MAX_CACHED_CHAPTERS = 3
 
         private val HEADING_STYLES = setOf(
             TextStyle.H1, TextStyle.H2, TextStyle.H3,

@@ -1,6 +1,7 @@
 package com.captainivy.ebookreader.ui.library
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
@@ -76,6 +77,12 @@ class LibraryActivity : AppCompatActivity() {
         reload()
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 横竖屏切换时按新的可用宽度重新计算封面网格列数
+        applyViewMode()
+    }
+
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_library, menu)
         val viewItem = menu.findItem(R.id.action_view)
@@ -113,11 +120,21 @@ class LibraryActivity : AppCompatActivity() {
     private fun applyViewMode() {
         val grid = prefs.libraryGrid
         adapter.grid = grid
+        val firstVisible = (binding.recycler.layoutManager as? LinearLayoutManager)
+            ?.findFirstVisibleItemPosition() ?: RecyclerView.NO_POSITION
         binding.recycler.layoutManager = if (grid) {
-            GridLayoutManager(this, GRID_COLUMNS)
+            GridLayoutManager(this, gridColumns())
         } else {
             LinearLayoutManager(this)
         }
+        if (firstVisible > 0) binding.recycler.scrollToPosition(firstVisible)
+    }
+
+    /** 按当前屏幕宽度自适应封面网格列数，横屏下自动展示更多列 */
+    private fun gridColumns(): Int {
+        val dm = resources.displayMetrics
+        val widthDp = dm.widthPixels / dm.density
+        return (widthDp / TARGET_COLUMN_DP).toInt().coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
     }
 
     // -------------------------------------------------------------- paging
@@ -249,6 +266,8 @@ class LibraryActivity : AppCompatActivity() {
 
     companion object {
         private const val PAGE_SIZE = 30
-        private const val GRID_COLUMNS = 3
+        private const val TARGET_COLUMN_DP = 110f
+        private const val MIN_GRID_COLUMNS = 2
+        private const val MAX_GRID_COLUMNS = 6
     }
 }
