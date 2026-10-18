@@ -22,6 +22,7 @@ import com.captainivy.ebookreader.R
 import com.captainivy.ebookreader.data.FontManager
 import com.captainivy.ebookreader.databinding.ActivitySettingsBinding
 import com.captainivy.ebookreader.net.HttpUploadService
+import com.captainivy.ebookreader.ui.reader.RefreshCadence
 import com.captainivy.ebookreader.util.DateUtils
 import com.captainivy.ebookreader.util.NetworkUtils
 import kotlinx.coroutines.Dispatchers
@@ -60,16 +61,19 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchLeftHand.setOnCheckedChangeListener { _, checked ->
             prefs.leftHandMode = checked
         }
+        binding.rowRefreshInterval.setOnClickListener { showRefreshIntervalDialog() }
         binding.rowPort.setOnClickListener { editPort() }
         binding.btnFontDownload.setOnClickListener { showFontDialog() }
         binding.btnFontImport.setOnClickListener { pickFont.launch(arrayOf("*/*")) }
 
         updateHttpUi()
+        updateRefreshIntervalUi()
         updateFontCount()
     }
 
     override fun onResume() {
         super.onResume()
+        updateRefreshIntervalUi()
         updateFontCount()
         loadStats()
     }
@@ -127,6 +131,33 @@ class SettingsActivity : AppCompatActivity() {
                     startHttp()
                 }
                 updateHttpUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---------------------------------------------------------- e-ink refresh
+
+    private fun updateRefreshIntervalUi() {
+        binding.txtRefreshInterval.text = refreshIntervalLabel(prefs.refreshInterval)
+    }
+
+    private fun refreshIntervalLabel(interval: Int): String = when (interval) {
+        RefreshCadence.OFF -> getString(R.string.refresh_interval_off)
+        1 -> getString(R.string.refresh_interval_every)
+        else -> getString(R.string.refresh_interval_every_n, interval)
+    }
+
+    private fun showRefreshIntervalDialog() {
+        val steps = RefreshCadence.STEPS
+        val labels = steps.map { refreshIntervalLabel(it) }.toTypedArray()
+        val currentIndex = steps.indexOf(prefs.refreshInterval).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.settings_refresh_interval)
+            .setSingleChoiceItems(labels, currentIndex) { dialog, which ->
+                prefs.refreshInterval = steps[which]
+                updateRefreshIntervalUi()
+                dialog.dismiss()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

@@ -33,6 +33,7 @@
     <string name="menu_toc">目录</string>
     <string name="menu_brightness">亮度</string>
     <string name="menu_typography">排版</string>
+    <string name="menu_refresh">全刷</string>
     <string name="toc_empty">本书没有目录信息</string>
     <string name="note_title">注释</string>
     <string name="note_not_found">未找到注释内容</string>
@@ -57,6 +58,12 @@
     <string name="settings_reading_section">阅读</string>
     <string name="settings_left_hand_mode">左手持有模式</string>
     <string name="settings_left_hand_mode_hint">开启后翻转左右翻页区域：点击阅读区左侧翻到下一页，点击右侧翻到上一页</string>
+    <string name="settings_refresh_section">墨水屏刷新</string>
+    <string name="settings_refresh_interval">翻页全刷</string>
+    <string name="settings_refresh_hint">墨水屏平时翻页采用快刷，屏幕不闪动；每 N 页自动全屏清刷一次以消除残影。也可在阅读界面点击「全刷」立即清除。</string>
+    <string name="refresh_interval_off">关闭自动全刷</string>
+    <string name="refresh_interval_every">每页全刷（最清晰）</string>
+    <string name="refresh_interval_every_n">每 %1$d 页全刷</string>
     <string name="settings_keyboard_section">键盘翻页</string>
     <string name="settings_keyboard_hint">连接键盘后可使用以下按键翻页：\n· 右方向键 / 下方向键：向前翻页\n· 左方向键 / 上方向键：向后翻页\n· 空格：向前翻页\n· Alt + 空格：向后翻页</string>
     <string name="settings_font_section">字体</string>

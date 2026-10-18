@@ -56,10 +56,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_JUSTIFY, false)
         set(v) = sp.edit().putBoolean(KEY_JUSTIFY, v).apply()
 
-    /** 翻页刷新模式：0 普通，1 全刷（用于墨水屏减少残影） */
-    var refreshMode: Int
-        get() = sp.getInt(KEY_REFRESH_MODE, REFRESH_NORMAL)
-        set(v) = sp.edit().putInt(KEY_REFRESH_MODE, v).apply()
+    /** 翻页全刷间隔（页）：0 关闭自动全刷，其余每 N 页清刷一次残影 */
+    var refreshInterval: Int
+        get() = sp.getInt(KEY_REFRESH_INTERVAL, REFRESH_INTERVAL_DEFAULT)
+        set(v) = sp.edit().putInt(KEY_REFRESH_INTERVAL, v).apply()
 
     /** 是否开启 HTTP 局域网上传 */
     var httpEnabled: Boolean
@@ -88,8 +88,7 @@ class Prefs(context: Context) {
         const val FONT_SERIF = "serif"
         const val FONT_SANS = "sans"
         const val FONT_MONO = "mono"
-        const val REFRESH_NORMAL = 0
-        const val REFRESH_FULL = 1
+        const val REFRESH_INTERVAL_DEFAULT = 5
 
         private const val KEY_SORT_KEY = "sort_key"
         private const val KEY_SORT_ASC = "sort_asc"
@@ -100,7 +99,7 @@ class Prefs(context: Context) {
         private const val KEY_MARGIN = "margin"
         private const val KEY_INDENT_FIRST_LINE = "indent_first_line"
         private const val KEY_JUSTIFY = "justify"
-        private const val KEY_REFRESH_MODE = "refresh_mode"
+        private const val KEY_REFRESH_INTERVAL = "refresh_interval"
         private const val KEY_HTTP_ENABLED = "http_enabled"
         private const val KEY_HTTP_PORT = "http_port"
         private const val KEY_LEFT_HAND_MODE = "left_hand_mode"

@@ -18,7 +18,8 @@ import com.captainivy.ebookreader.ui.reader.layout.ChapterLayout
 import com.captainivy.ebookreader.ui.reader.layout.PlacedItem
 
 /**
- * 单页渲染视图：一次只绘制一页，翻页时整屏重绘以避免墨水屏残影。
+ * 单页渲染视图：一次只绘制一页。翻页只做一次整屏重绘，
+ * 残影由 [EinkRefreshController] 按节奏触发的厂商全刷清除，避免软件模拟黑屏造成的双闪。
  */
 class ReaderView @JvmOverloads constructor(
     context: Context,
@@ -40,9 +41,6 @@ class ReaderView @JvmOverloads constructor(
     var quoteBarColor: Int = Color.parseColor("#C7BFA8")
     var codeColor: Int = Color.parseColor("#EEEAE0")
     var ruleColor: Int = Color.parseColor("#CFC8B8")
-
-    /** 翻页刷新模式：0 普通，1 全刷（黑屏闪一下） */
-    var refreshMode: Int = 0
 
     private var chapterLayout: ChapterLayout? = null
     private var pageIndex: Int = 0
@@ -69,8 +67,6 @@ class ReaderView @JvmOverloads constructor(
         textAlign = Paint.Align.RIGHT
     }
 
-    private var flashPending = false
-
     fun setBands(headerPx: Int, footerPx: Int) {
         headerBand = headerPx
         footerBand = footerPx
@@ -80,21 +76,12 @@ class ReaderView @JvmOverloads constructor(
 
     fun currentPage(): Int = pageIndex
 
-    fun showPage(layout: ChapterLayout?, page: Int, title: String, progress: String, flash: Boolean) {
+    fun showPage(layout: ChapterLayout?, page: Int, title: String, progress: String) {
         chapterLayout = layout
         pageIndex = page.coerceAtLeast(0)
         chapterTitle = title
         progressText = progress
-        if (flash && refreshMode == 1) {
-            flashPending = true
-            invalidate()
-            postDelayed({
-                flashPending = false
-                invalidate()
-            }, 60L)
-        } else {
-            invalidate()
-        }
+        invalidate()
     }
 
     fun updateLabels(title: String, progress: String) {
@@ -105,11 +92,6 @@ class ReaderView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(pageColor)
-
-        if (flashPending) {
-            canvas.drawColor(Color.BLACK)
-            return
-        }
 
         val layout = chapterLayout ?: return
         if (pageIndex >= layout.pages.size) return

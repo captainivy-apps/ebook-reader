@@ -155,5 +155,32 @@
                 android:textColor="#666666"
                 android:textSize="11sp" />
         </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnRefresh"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:contentDescription="@string/menu_refresh"
+                android:src="@drawable/ic_refresh"
+                app:tint="#333333" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="@string/menu_refresh"
+                android:textColor="#666666"
+                android:textSize="11sp" />
+        </LinearLayout>
     </LinearLayout>
 </FrameLayout>

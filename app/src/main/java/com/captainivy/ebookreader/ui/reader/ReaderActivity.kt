@@ -58,6 +58,9 @@ class ReaderActivity : AppCompatActivity() {
     private val contentParser = ChapterContentParser()
     private val paginator = Paginator()
 
+    private val einkRefresh = EinkRefreshController.get()
+    private val refreshCadence = RefreshCadence(prefs.refreshInterval)
+
     private var chapterIndex = 0
     private var layout: ChapterLayout? = null
     private var page = 0
@@ -87,7 +90,6 @@ class ReaderActivity : AppCompatActivity() {
 
         applyReaderPadding()
         applyLeftHandIndicator()
-        binding.readerView.refreshMode = prefs.refreshMode
         binding.readerView.onTapListener = ::onTap
         binding.readerView.onNoteTapListener = ::onNoteTap
         binding.readerView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> onViewLayout() }
@@ -147,6 +149,15 @@ class ReaderActivity : AppCompatActivity() {
         binding.btnToc.setOnClickListener { showTocDialog() }
         binding.btnBrightness.setOnClickListener { showBrightnessDialog() }
         binding.btnTypography.setOnClickListener { showTypographyDialog() }
+        binding.btnRefresh.setOnClickListener { manualRefresh() }
+    }
+
+    /** 立即全屏清刷一次并重置自动全刷节奏 */
+    private fun manualRefresh() {
+        refreshCadence.reset()
+        if (!einkRefresh.fullRefresh(binding.readerView)) {
+            binding.readerView.invalidate()
+        }
     }
 
     /** 左手模式开启时在阅读区左下角显示提示图标 */
@@ -208,7 +219,7 @@ class ReaderActivity : AppCompatActivity() {
         lastHeight = h
         if (!bookReady) return
         if (layout != null) {
-            reloadChapter(chapterIndex, currentOffset(), flash = false)
+            reloadChapter(chapterIndex, currentOffset(), pageTurn = false)
         } else {
             maybeStartReading()
         }
@@ -217,7 +228,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun maybeStartReading() {
         if (!bookReady || layout != null) return
         if (binding.readerView.width <= 0) return
-        showChapter(pendingChapter, pendingOffset, flash = false)
+        showChapter(pendingChapter, pendingOffset, pageTurn = false)
     }
 
     // ------------------------------------------------------------- render core
@@ -246,7 +257,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun showChapter(
         index: Int,
         offset: Int,
-        flash: Boolean,
+        pageTurn: Boolean,
         startAtLastPage: Boolean = false,
         anchor: String? = null
     ) {
@@ -289,20 +300,31 @@ class ReaderActivity : AppCompatActivity() {
                 anchorOffset != null -> newLayout.pageForOffset(anchorOffset)
                 else -> newLayout.pageForOffset(offset)
             }
-            render(flash)
+            render(pageTurn)
         }
     }
 
-    private fun reloadChapter(index: Int, offset: Int, flash: Boolean) {
-        showChapter(index, offset, flash)
+    private fun reloadChapter(index: Int, offset: Int, pageTurn: Boolean) {
+        showChapter(index, offset, pageTurn)
     }
 
-    private fun render(flash: Boolean) {
+    private fun render(pageTurn: Boolean) {
         val l = layout ?: return
         val off = l.offsetForPage(page)
         val title = chapters.getOrNull(chapterIndex)?.title.orEmpty()
-        binding.readerView.showPage(l, page, title, progressText(off), flash)
+        binding.readerView.showPage(l, page, title, progressText(off))
         updateSessionOffset(off)
+        if (pageTurn) maybeClearGhosting()
+    }
+
+    /**
+     * 翻页后按节奏清除残影：每 [Prefs.refreshInterval] 次翻页请求一次厂商全屏清刷。
+     * 非墨水屏或厂商接口不可用时静默跳过。
+     */
+    private fun maybeClearGhosting() {
+        if (einkRefresh.available && refreshCadence.onPageTurn()) {
+            einkRefresh.fullRefresh(binding.readerView)
+        }
     }
 
     private fun currentOffset(): Int = layout?.offsetForPage(page) ?: 0
@@ -349,7 +371,7 @@ class ReaderActivity : AppCompatActivity() {
             page++
             render(true)
         } else if (chapterIndex < chapters.size - 1) {
-            showChapter(chapterIndex + 1, 0, flash = true)
+            showChapter(chapterIndex + 1, 0, pageTurn = true)
         }
     }
 
@@ -358,7 +380,7 @@ class ReaderActivity : AppCompatActivity() {
             page--
             render(true)
         } else if (chapterIndex > 0) {
-            showChapter(chapterIndex - 1, 0, flash = true, startAtLastPage = true)
+            showChapter(chapterIndex - 1, 0, pageTurn = true, startAtLastPage = true)
         }
     }
 
@@ -430,7 +452,7 @@ class ReaderActivity : AppCompatActivity() {
             .setAdapter(adapter) { _, which ->
                 val item = tocItems[which]
                 val target = item.spineIndex.coerceIn(0, chapters.size - 1)
-                showChapter(target, 0, flash = false, anchor = item.anchor)
+                showChapter(target, 0, pageTurn = false, anchor = item.anchor)
                 hideBars()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -588,12 +610,11 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun applyTypographyPreview() {
         applyReaderPadding()
-        binding.readerView.refreshMode = prefs.refreshMode
         val keepOffset = currentOffset()
         typoReloadJob?.cancel()
         typoReloadJob = lifecycleScope.launch {
             delay(TYPO_PREVIEW_DEBOUNCE_MS)
-            reloadChapter(chapterIndex, keepOffset, flash = false)
+            reloadChapter(chapterIndex, keepOffset, pageTurn = false)
         }
     }
 
