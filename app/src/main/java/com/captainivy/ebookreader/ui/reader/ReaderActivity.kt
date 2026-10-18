@@ -112,7 +112,6 @@ class ReaderActivity : AppCompatActivity() {
         applyReaderPadding()
         applyLeftHandIndicator()
         einkRefresh.attach(this)
-        binding.readerView.setDeviceLabel(einkRefresh.deviceSummary())
         binding.readerView.onTapListener = ::onTap
         binding.readerView.onNoteTapListener = ::onNoteTap
         binding.readerView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> onViewLayout() }
@@ -557,7 +556,7 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
         val adapter = TocAdapter(this, tocItems, chapterIndex)
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.menu_toc)
             .setAdapter(adapter) { _, which ->
                 val item = tocItems[which]
@@ -567,6 +566,19 @@ class ReaderActivity : AppCompatActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .showForEink()
+        // 打开目录时自动定位到当前阅读章节
+        val position = currentTocPosition()
+        dialog.listView?.post { dialog.listView?.setSelectionFromTop(position, dp(12)) }
+    }
+
+    /** 当前阅读章节在目录列表中的位置：优先精确匹配，否则取最靠前的所在章节 */
+    private fun currentTocPosition(): Int {
+        var fallback = 0
+        tocItems.forEachIndexed { i, item ->
+            if (item.spineIndex == chapterIndex) return i
+            if (item.spineIndex < chapterIndex) fallback = i
+        }
+        return fallback
     }
 
     /** 点击脚注/尾注上标：解析注释内容并弹窗展示 */

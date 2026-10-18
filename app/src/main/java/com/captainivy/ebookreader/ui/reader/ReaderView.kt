@@ -48,9 +48,6 @@ class ReaderView @JvmOverloads constructor(
     private var chapterTitle: String = ""
     private var progressText: String = ""
 
-    /** 底部进度左侧的小字，用于显示识别到的墨水屏设备 */
-    private var deviceLabel: String = ""
-
     private var headerBand: Int = 0
     private var footerBand: Int = 0
 
@@ -69,22 +66,10 @@ class ReaderView @JvmOverloads constructor(
         )
         textAlign = Paint.Align.RIGHT
     }
-    private val devicePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, 10f, resources.displayMetrics
-        )
-        textAlign = Paint.Align.RIGHT
-    }
 
     fun setBands(headerPx: Int, footerPx: Int) {
         headerBand = headerPx
         footerBand = footerPx
-    }
-
-    fun setDeviceLabel(label: String) {
-        if (label == deviceLabel) return
-        deviceLabel = label
-        invalidate()
     }
 
     fun getChapterLayout(): ChapterLayout? = chapterLayout
@@ -197,20 +182,7 @@ class ReaderView @JvmOverloads constructor(
         }
         if (progressText.isNotEmpty()) {
             val baseline = height - footerBand + progressPaint.textSize + 6f
-            val right = (width - paddingRight).toFloat()
-            canvas.drawText(progressText, right, baseline, progressPaint)
-            if (deviceLabel.isNotEmpty()) {
-                val gap = 10f * resources.displayMetrics.density
-                val deviceRight = right - progressPaint.measureText(progressText) - gap
-                devicePaint.color = labelColor
-                canvas.drawText(deviceLabel, deviceRight, baseline, devicePaint)
-            }
-        } else if (deviceLabel.isNotEmpty()) {
-            devicePaint.color = labelColor
-            canvas.drawText(
-                deviceLabel, (width - paddingRight).toFloat(),
-                height - footerBand + devicePaint.textSize + 6f, devicePaint
-            )
+            canvas.drawText(progressText, (width - paddingRight).toFloat(), baseline, progressPaint)
         }
     }
 

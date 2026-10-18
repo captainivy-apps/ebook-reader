@@ -56,6 +56,7 @@
     <string name="settings_http_hint">在同一局域网的电脑浏览器中打开以上地址上传 EPUB</string>
     <string name="settings_http_disabled">未开启</string>
     <string name="settings_reading_section">阅读</string>
+    <string name="settings_eink_device">墨水屏设备</string>
     <string name="settings_left_hand_mode">左手持有模式</string>
     <string name="settings_left_hand_mode_hint">开启后翻转左右翻页区域：点击阅读区左侧翻到下一页，点击右侧翻到上一页</string>
     <string name="settings_refresh_section">墨水屏刷新</string>

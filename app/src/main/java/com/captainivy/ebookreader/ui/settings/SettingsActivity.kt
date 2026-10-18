@@ -22,6 +22,7 @@ import com.captainivy.ebookreader.R
 import com.captainivy.ebookreader.data.FontManager
 import com.captainivy.ebookreader.databinding.ActivitySettingsBinding
 import com.captainivy.ebookreader.net.HttpUploadService
+import com.captainivy.ebookreader.ui.reader.EinkRefreshController
 import com.captainivy.ebookreader.ui.reader.RefreshCadence
 import com.captainivy.ebookreader.util.DateUtils
 import com.captainivy.ebookreader.util.NetworkUtils
@@ -54,6 +55,10 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
+
+        val einkRefresh = EinkRefreshController.get()
+        einkRefresh.attach(this)
+        binding.txtEinkDevice.text = einkRefresh.deviceSummary()
 
         binding.switchHttp.isChecked = prefs.httpEnabled
         binding.switchHttp.setOnCheckedChangeListener { _, checked -> onHttpToggled(checked) }
