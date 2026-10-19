@@ -266,6 +266,17 @@
                     android:textSize="15sp" />
 
                 <TextView
+                    android:id="@+id/btnFontUrl"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:minHeight="44dp"
+                    android:gravity="center_vertical"
+                    android:text="@string/settings_font_url"
+                    android:textColor="#222222"
+                    android:textSize="15sp" />
+
+                <TextView
                     android:id="@+id/txtFontCount"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

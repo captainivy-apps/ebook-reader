@@ -19,6 +19,8 @@ object FontManager {
 
     private val FONT_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc")
 
+    private const val USER_AGENT = "Mozilla/5.0 (Linux; Android) EbookReader"
+
     /**
      * 可下载字体。
      * - [directUrls]：直链（优先尝试，jsDelivr CDN，国内可访问且体积小）
@@ -258,6 +260,7 @@ object FontManager {
             connectTimeout = 15000
             readTimeout = 180000
             instanceFollowRedirects = true
+            setRequestProperty("User-Agent", USER_AGENT)
         }
         conn.connect()
         try {
@@ -276,6 +279,59 @@ object FontManager {
         file.length() > 4096 && Typeface.createFromFile(file.path) != null
     } catch (_: Exception) {
         false
+    }
+
+    // -------------------------------------------------------------- url import
+
+    /**
+     * 从任意直链下载字体到 [fontsDir]。成功返回 null，失败返回错误信息。
+     * 文件名取自 URL 最后一段（去除查询串并解码），无有效字体扩展名时补 .ttf。
+     */
+    fun importFromUrl(url: String, fontsDir: File): String? {
+        val dest = uniqueFontFile(fontsDir, fileNameFromUrl(url))
+        return try {
+            fetch(url, dest)
+            if (isValidFont(dest)) {
+                null
+            } else {
+                dest.delete()
+                "字体文件校验失败"
+            }
+        } catch (e: Exception) {
+            dest.delete()
+            e.message ?: "下载失败"
+        }
+    }
+
+    /** 避免覆盖同名文件：重名时追加序号 */
+    private fun uniqueFontFile(dir: File, name: String): File {
+        var file = File(dir, name)
+        if (!file.exists()) return file
+        val base = name.substringBeforeLast('.', name)
+        val ext = name.substringAfterLast('.', "ttf")
+        var index = 1
+        while (file.exists()) {
+            file = File(dir, "$base ($index).$ext")
+            index++
+        }
+        return file
+    }
+
+    private fun fileNameFromUrl(url: String): String {
+        val raw = try {
+            URL(url).path.substringAfterLast('/')
+        } catch (_: Exception) {
+            url.substringBefore('?').substringBefore('#').substringAfterLast('/')
+        }
+        val decoded = try {
+            java.net.URLDecoder.decode(raw, "UTF-8")
+        } catch (_: Exception) {
+            raw
+        }
+        val safe = decoded.replace(Regex("[^\\p{L}\\p{N}._-]"), "_").trim('.', '_')
+        if (safe.isBlank()) return "font_${System.currentTimeMillis()}.ttf"
+        val ext = safe.substringAfterLast('.', "").lowercase()
+        return if (ext in FONT_EXTENSIONS) safe else "$safe.ttf"
     }
 
     // ------------------------------------------------------ tar.gz extraction

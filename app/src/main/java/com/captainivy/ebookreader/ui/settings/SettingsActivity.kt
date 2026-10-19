@@ -70,6 +70,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.rowPort.setOnClickListener { editPort() }
         binding.btnFontDownload.setOnClickListener { showFontDialog() }
         binding.btnFontImport.setOnClickListener { pickFont.launch(arrayOf("*/*")) }
+        binding.btnFontUrl.setOnClickListener { showFontUrlDialog() }
 
         updateHttpUi()
         updateRefreshIntervalUi()
@@ -223,6 +224,45 @@ class SettingsActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(this@SettingsActivity, result, Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    private fun showFontUrlDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            hint = getString(R.string.font_url_hint)
+            setSingleLine()
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.font_url_title)
+            .setView(container)
+            .setPositiveButton(R.string.settings_font_url) { _, _ ->
+                val url = input.text.toString().trim()
+                if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+                    Toast.makeText(this, R.string.font_url_invalid, Toast.LENGTH_SHORT).show()
+                } else {
+                    importFontFromUrl(url)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun importFontFromUrl(url: String) {
+        Toast.makeText(this, R.string.font_url_downloading, Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                FontManager.importFromUrl(url, repo.storage().fontsDir)
+            }
+            updateFontCount()
+            val msg = result ?: getString(R.string.font_url_success)
+            Toast.makeText(this@SettingsActivity, msg, Toast.LENGTH_SHORT).show()
         }
     }
 

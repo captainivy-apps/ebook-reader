@@ -70,6 +70,12 @@
     <string name="settings_font_section">字体</string>
     <string name="settings_font_download">下载字体</string>
     <string name="settings_font_import">导入本地字体</string>
+    <string name="settings_font_url">从 URL 导入字体</string>
+    <string name="font_url_title">从 URL 导入字体</string>
+    <string name="font_url_hint">输入字体文件直链（.ttf / .otf / .ttc）</string>
+    <string name="font_url_invalid">请输入有效的 http(s) 地址</string>
+    <string name="font_url_downloading">正在下载字体…</string>
+    <string name="font_url_success">字体导入完成</string>
     <string name="font_count">已安装 %1$d 个下载字体</string>
     <string name="font_downloaded">（已下载）</string>
     <string name="font_not_downloaded">（未下载）</string>
