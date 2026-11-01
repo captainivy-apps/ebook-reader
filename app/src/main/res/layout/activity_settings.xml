@@ -215,10 +215,66 @@
                 android:orientation="vertical"
                 android:padding="14dp">
 
+                <LinearLayout
+                    android:id="@+id/rowNextKeys"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center_vertical"
+                    android:minHeight="44dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_page_next"
+                        android:textColor="#222222"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/txtNextKeys"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:maxWidth="220dp"
+                        android:textColor="#888888"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/rowPrevKeys"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center_vertical"
+                    android:minHeight="44dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_page_prev"
+                        android:textColor="#222222"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/txtPrevKeys"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:maxWidth="220dp"
+                        android:textColor="#888888"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
                 <TextView
                     android:id="@+id/txtKeyboardHint"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
                     android:lineSpacingExtra="4dp"
                     android:text="@string/settings_keyboard_hint"
                     android:textColor="#666666"
@@ -301,45 +357,104 @@
                 android:layout_marginTop="8dp"
                 android:background="#FFFFFF"
                 android:orientation="vertical"
-                android:padding="14dp">
+                android:padding="16dp">
 
                 <TextView
-                    android:id="@+id/txtStatsSummary"
+                    android:id="@+id/txtStatsEmpty"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:lineSpacingExtra="4dp"
-                    android:textColor="#333333"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/settings_stats_recent"
-                    android:textColor="#7A8B6F"
-                    android:textSize="13sp" />
+                    android:text="@string/settings_stats_empty"
+                    android:textColor="#666666"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
 
                 <LinearLayout
-                    android:id="@+id/statsRecentContainer"
+                    android:id="@+id/statsSummaryContainer"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:orientation="vertical" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/settings_stats_top"
-                    android:textColor="#7A8B6F"
-                    android:textSize="13sp" />
+                    android:orientation="vertical"
+                    android:visibility="gone" />
 
                 <LinearLayout
-                    android:id="@+id/statsTopContainer"
+                    android:id="@+id/statsRecentSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:orientation="vertical" />
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:background="#E6E6E6" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/settings_stats_recent"
+                        android:textColor="#7A8B6F"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:id="@+id/statsRecentContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="vertical" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/statsTopSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:background="#E6E6E6" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/settings_stats_top"
+                        android:textColor="#7A8B6F"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:id="@+id/statsTopContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="vertical" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/statsClearDivider"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="12dp"
+                    android:background="#E6E6E6"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/btnClearStats"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center"
+                    android:minHeight="44dp"
+                    android:text="@string/stats_clear"
+                    android:textColor="#B05050"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

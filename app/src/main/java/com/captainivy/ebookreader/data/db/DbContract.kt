@@ -18,6 +18,7 @@ object DbContract {
         const val TOTAL_CHARS = "total_chars"
         const val CURRENT_CHAPTER = "current_chapter"
         const val CURRENT_OFFSET = "current_offset"
+        const val MAX_READ_OFFSET = "max_read_offset"
         const val FINISHED = "finished"
     }
 

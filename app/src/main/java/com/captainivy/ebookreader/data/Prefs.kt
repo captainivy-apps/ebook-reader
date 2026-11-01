@@ -2,6 +2,7 @@ package com.captainivy.ebookreader.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.view.KeyEvent
 
 /**
  * 全局设置，落盘于 SharedPreferences。
@@ -81,6 +82,16 @@ class Prefs(context: Context) {
         get() = sp.getInt(KEY_HTTP_PORT, 8080)
         set(v) = sp.edit().putInt(KEY_HTTP_PORT, v).apply()
 
+    /** 向前翻页（阅读进度前进）按键列表，用户可自定义多个 */
+    var nextPageKeys: List<Int>
+        get() = decodeKeys(sp.getString(KEY_NEXT_PAGE_KEYS, null), DEFAULT_NEXT_PAGE_KEYS)
+        set(v) = sp.edit().putString(KEY_NEXT_PAGE_KEYS, encodeKeys(v)).apply()
+
+    /** 向后翻页（阅读进度后退）按键列表，用户可自定义多个 */
+    var prevPageKeys: List<Int>
+        get() = decodeKeys(sp.getString(KEY_PREV_PAGE_KEYS, null), DEFAULT_PREV_PAGE_KEYS)
+        set(v) = sp.edit().putString(KEY_PREV_PAGE_KEYS, encodeKeys(v)).apply()
+
     companion object {
         const val SORT_LAST_READ = "last_read"
         const val SORT_ADDED = "added"
@@ -89,6 +100,34 @@ class Prefs(context: Context) {
         const val FONT_SANS = "sans"
         const val FONT_MONO = "mono"
         const val REFRESH_INTERVAL_DEFAULT = 5
+
+        val DEFAULT_NEXT_PAGE_KEYS = listOf(
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            KeyEvent.KEYCODE_SPACE
+        )
+
+        val DEFAULT_PREV_PAGE_KEYS = listOf(
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_VOLUME_UP
+        )
+
+        /** 按键列表持久化为逗号分隔的 KeyCode */
+        fun encodeKeys(keys: List<Int>): String = keys.joinToString(",")
+
+        /**
+         * 解析按键列表。null 表示从未设置，使用默认值；空字符串表示用户已清空。
+         * 非法项与重复项会被忽略。
+         */
+        fun decodeKeys(raw: String?, defaults: List<Int>): List<Int> {
+            if (raw == null) return defaults.toList()
+            if (raw.isBlank()) return emptyList()
+            return raw.split(',')
+                .mapNotNull { it.trim().toIntOrNull() }
+                .distinct()
+        }
 
         private const val KEY_SORT_KEY = "sort_key"
         private const val KEY_SORT_ASC = "sort_asc"
@@ -104,5 +143,7 @@ class Prefs(context: Context) {
         private const val KEY_HTTP_PORT = "http_port"
         private const val KEY_LEFT_HAND_MODE = "left_hand_mode"
         private const val KEY_LIBRARY_GRID = "library_grid"
+        private const val KEY_NEXT_PAGE_KEYS = "next_page_keys"
+        private const val KEY_PREV_PAGE_KEYS = "prev_page_keys"
     }
 }

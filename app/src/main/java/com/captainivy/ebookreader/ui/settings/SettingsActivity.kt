@@ -8,6 +8,9 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.text.InputType
 import android.util.TypedValue
+import android.view.Gravity
+import android.view.KeyEvent
+import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -20,13 +23,22 @@ import androidx.lifecycle.lifecycleScope
 import com.captainivy.ebookreader.App
 import com.captainivy.ebookreader.R
 import com.captainivy.ebookreader.data.FontManager
+import com.captainivy.ebookreader.data.model.DailyReadingStat
+import com.captainivy.ebookreader.data.model.StatsSummary
+import com.captainivy.ebookreader.data.model.TopBook
 import com.captainivy.ebookreader.databinding.ActivitySettingsBinding
+import com.captainivy.ebookreader.databinding.DialogPageKeysBinding
+import com.captainivy.ebookreader.databinding.ItemStatsBookBinding
+import com.captainivy.ebookreader.databinding.ItemStatsDayBinding
+import com.captainivy.ebookreader.databinding.ItemStatsSummaryBinding
 import com.captainivy.ebookreader.net.HttpUploadService
 import com.captainivy.ebookreader.ui.reader.EinkRefreshController
 import com.captainivy.ebookreader.ui.reader.RefreshCadence
 import com.captainivy.ebookreader.util.DateUtils
+import com.captainivy.ebookreader.util.KeyNames
 import com.captainivy.ebookreader.util.NetworkUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -37,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
     private val prefs by lazy { App.get().prefs }
     private val repo by lazy { App.get().repository }
+    private var statsJob: Job? = null
 
     private val pickFont =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -67,19 +80,24 @@ class SettingsActivity : AppCompatActivity() {
             prefs.leftHandMode = checked
         }
         binding.rowRefreshInterval.setOnClickListener { showRefreshIntervalDialog() }
+        binding.rowNextKeys.setOnClickListener { showPageKeysDialog(PageDirection.NEXT) }
+        binding.rowPrevKeys.setOnClickListener { showPageKeysDialog(PageDirection.PREV) }
         binding.rowPort.setOnClickListener { editPort() }
         binding.btnFontDownload.setOnClickListener { showFontDialog() }
         binding.btnFontImport.setOnClickListener { pickFont.launch(arrayOf("*/*")) }
         binding.btnFontUrl.setOnClickListener { showFontUrlDialog() }
+        binding.btnClearStats.setOnClickListener { confirmClearStats() }
 
         updateHttpUi()
         updateRefreshIntervalUi()
+        updatePageKeyUi()
         updateFontCount()
     }
 
     override fun onResume() {
         super.onResume()
         updateRefreshIntervalUi()
+        updatePageKeyUi()
         updateFontCount()
         loadStats()
     }
@@ -167,6 +185,150 @@ class SettingsActivity : AppCompatActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    // ------------------------------------------------------------- page keys
+
+    private enum class PageDirection { NEXT, PREV }
+
+    private fun updatePageKeyUi() {
+        binding.txtNextKeys.text = pageKeysLabel(prefs.nextPageKeys)
+        binding.txtPrevKeys.text = pageKeysLabel(prefs.prevPageKeys)
+    }
+
+    private fun pageKeysLabel(keys: List<Int>): String =
+        if (keys.isEmpty()) {
+            getString(R.string.page_keys_none)
+        } else {
+            keys.joinToString("、") { KeyNames.label(this, it) }
+        }
+
+    private fun keysFor(direction: PageDirection): List<Int> =
+        if (direction == PageDirection.NEXT) prefs.nextPageKeys else prefs.prevPageKeys
+
+    private fun setKeysFor(direction: PageDirection, keys: List<Int>) {
+        if (direction == PageDirection.NEXT) prefs.nextPageKeys = keys else prefs.prevPageKeys = keys
+    }
+
+    private fun directionLabel(direction: PageDirection): String =
+        getString(if (direction == PageDirection.NEXT) R.string.settings_page_next else R.string.settings_page_prev)
+
+    private fun showPageKeysDialog(direction: PageDirection) {
+        val dialogBinding = DialogPageKeysBinding.inflate(layoutInflater)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(directionLabel(direction))
+            .setView(dialogBinding.root)
+            .setNegativeButton(R.string.page_keys_close, null)
+            .create()
+
+        fun refresh() {
+            val keys = keysFor(direction)
+            dialogBinding.keyListContainer.removeAllViews()
+            dialogBinding.txtEmpty.visibility = if (keys.isEmpty()) View.VISIBLE else View.GONE
+            keys.forEach { keyCode ->
+                dialogBinding.keyListContainer.addView(keyRow(keyCode) {
+                    setKeysFor(direction, keysFor(direction) - keyCode)
+                    refresh()
+                    updatePageKeyUi()
+                })
+            }
+            dialogBinding.btnClearKeys.isEnabled = keys.isNotEmpty()
+            dialogBinding.btnClearKeys.alpha = if (keys.isEmpty()) 0.4f else 1f
+        }
+
+        dialogBinding.btnAddKey.setOnClickListener {
+            showKeyCaptureDialog(direction) {
+                refresh()
+                updatePageKeyUi()
+            }
+        }
+        dialogBinding.btnClearKeys.setOnClickListener {
+            setKeysFor(direction, emptyList())
+            refresh()
+            updatePageKeyUi()
+            Toast.makeText(this, R.string.page_keys_cleared, Toast.LENGTH_SHORT).show()
+        }
+
+        refresh()
+        dialog.show()
+    }
+
+    private fun keyRow(keyCode: Int, onDelete: () -> Unit): View {
+        val density = resources.displayMetrics.density
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = (44 * density).toInt()
+        }
+        row.addView(TextView(this).apply {
+            text = KeyNames.label(this@SettingsActivity, keyCode)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextColor(0xFF222222.toInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        row.addView(TextView(this).apply {
+            text = getString(R.string.page_keys_delete)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextColor(0xFFB05050.toInt())
+            setPadding((12 * density).toInt(), 0, 0, 0)
+            setOnClickListener { onDelete() }
+        })
+        return row
+    }
+
+    private fun showKeyCaptureDialog(direction: PageDirection, onAdded: () -> Unit) {
+        val prompt = TextView(this).apply {
+            text = getString(R.string.page_keys_capture_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            gravity = Gravity.CENTER
+            val pad = (24 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.page_keys_capture_title)
+            .setView(prompt)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        dialog.setOnKeyListener { d, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            if (keyCode == KeyEvent.KEYCODE_BACK) return@setOnKeyListener false
+            if (keyCode == KeyEvent.KEYCODE_UNKNOWN) return@setOnKeyListener true
+            if (event.repeatCount > 0) return@setOnKeyListener true
+            if (KeyNames.isModifierKey(keyCode)) return@setOnKeyListener true
+            if (event.isAltPressed || event.isCtrlPressed || event.isShiftPressed || event.isMetaPressed) {
+                return@setOnKeyListener true
+            }
+
+            val current = keysFor(direction)
+            val other = if (direction == PageDirection.NEXT) prefs.prevPageKeys else prefs.nextPageKeys
+            when {
+                keyCode in current -> {
+                    Toast.makeText(this, R.string.page_keys_duplicate_same, Toast.LENGTH_SHORT).show()
+                }
+                keyCode in other -> {
+                    val otherDirection =
+                        if (direction == PageDirection.NEXT) PageDirection.PREV else PageDirection.NEXT
+                    Toast.makeText(
+                        this,
+                        getString(R.string.page_keys_duplicate_other, directionLabel(otherDirection)),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                else -> {
+                    setKeysFor(direction, current + keyCode)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.page_keys_added, KeyNames.label(this, keyCode)),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    d.dismiss()
+                    onAdded()
+                }
+            }
+            true
+        }
+        dialog.show()
     }
 
     // ------------------------------------------------------------------ fonts
@@ -295,71 +457,165 @@ class SettingsActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ stats
 
-    private data class StatsData(
-        val totalMs: Long,
-        val chars: Int,
-        val books: Int,
-        val recent: List<com.captainivy.ebookreader.data.model.ReadingStat>,
-        val top: List<Pair<String, Long>>
-    )
-
     private fun loadStats() {
-        lifecycleScope.launch {
-            val data = withContext(Dispatchers.IO) {
-                val totalMs = repo.totalReadingMs()
-                val chars = repo.totalReadChars()
-                val books = repo.count()
-                val recent = repo.recentDailyStats(7)
-                val top = repo.topBooksByTime(5).map { (id, ms) ->
-                    (repo.get(id)?.title ?: "已删除的书籍") to ms
-                }
-                StatsData(totalMs, chars, books, recent, top)
+        statsJob?.cancel()
+        statsJob = lifecycleScope.launch {
+            val (summary, recent, top) = withContext(Dispatchers.IO) {
+                val summary = repo.statsSummary()
+                val days = DateUtils.lastNDays(7)
+                val recent = repo.dailyStatsSince(days.last())
+                Triple(summary, recent, repo.topBooksByTime(5))
             }
-            binding.txtStatsSummary.text = buildString {
-                append(getString(R.string.stats_summary, data.books))
-                append('\n')
-                append(getString(R.string.stats_total_time, DateUtils.formatTime(data.totalMs)))
-                append('\n')
-                append(getString(R.string.stats_total_chars, data.chars))
-            }
-            renderRecent(data.recent)
-            renderTop(data.top)
+            renderStats(summary, recent, top)
         }
     }
 
-    private fun renderRecent(recent: List<com.captainivy.ebookreader.data.model.ReadingStat>) {
-        binding.statsRecentContainer.removeAllViews()
-        if (recent.isEmpty()) {
-            binding.statsRecentContainer.addView(smallText(getString(R.string.stats_none)))
-            return
-        }
-        recent.forEach {
-            binding.statsRecentContainer.addView(
-                smallText("${it.day}    ${DateUtils.formatTime(it.readMs)} · ${it.chars} 字")
+    private fun renderStats(
+        summary: StatsSummary,
+        recent: List<DailyReadingStat>,
+        top: List<TopBook>
+    ) {
+        val hasData = summary.totalMs > 0 || summary.totalChars > 0 || summary.dayCount > 0
+        binding.txtStatsEmpty.visibility = if (hasData) View.GONE else View.VISIBLE
+        binding.statsSummaryContainer.visibility = if (hasData) View.VISIBLE else View.GONE
+        binding.statsRecentSection.visibility = if (hasData) View.VISIBLE else View.GONE
+        binding.statsTopSection.visibility = if (hasData) View.VISIBLE else View.GONE
+        binding.statsClearDivider.visibility = if (hasData) View.VISIBLE else View.GONE
+        binding.btnClearStats.visibility = if (hasData) View.VISIBLE else View.GONE
+        if (!hasData) return
+
+        renderSummary(summary)
+        renderRecent(recent)
+        renderTop(top)
+    }
+
+    private fun renderSummary(summary: StatsSummary) {
+        binding.statsSummaryContainer.removeAllViews()
+        addSummaryRow(
+            R.string.settings_stats_total_time,
+            DateUtils.formatDuration(summary.totalMs)
+        )
+        addDivider(binding.statsSummaryContainer)
+        addSummaryRow(
+            R.string.settings_stats_total_chars,
+            getString(
+                R.string.stats_value_chars,
+                DateUtils.formatCount(summary.totalChars.toLong())
             )
+        )
+        addDivider(binding.statsSummaryContainer)
+        addSummaryRow(
+            R.string.settings_stats_days,
+            getString(R.string.stats_value_days, summary.dayCount)
+        )
+        addDivider(binding.statsSummaryContainer)
+        addSummaryRow(
+            R.string.settings_stats_books,
+            getString(R.string.stats_value_books, summary.bookCount)
+        )
+    }
+
+    private fun addSummaryRow(labelRes: Int, value: String) {
+        val item = ItemStatsSummaryBinding.inflate(
+            layoutInflater,
+            binding.statsSummaryContainer,
+            false
+        )
+        item.txtLabel.setText(labelRes)
+        item.txtValue.text = value
+        binding.statsSummaryContainer.addView(item.root)
+    }
+
+    private fun renderRecent(recent: List<DailyReadingStat>) {
+        binding.statsRecentContainer.removeAllViews()
+        val byDay = recent.associateBy { it.day }
+        val today = DateUtils.today()
+        val days = DateUtils.lastNDays(7)
+        days.forEachIndexed { index, day ->
+            val stat = byDay[day]
+            val item = ItemStatsDayBinding.inflate(
+                layoutInflater,
+                binding.statsRecentContainer,
+                false
+            )
+            item.txtDay.text = DateUtils.formatDayLabel(day, today)
+            if (stat == null || (stat.readMs <= 0 && stat.chars <= 0)) {
+                item.txtDay.setTextColor(0xFF777777.toInt())
+                item.txtValue.setText(R.string.stats_no_record)
+                item.txtValue.setTextColor(0xFF999999.toInt())
+            } else {
+                item.txtDay.setTextColor(
+                    if (day == today) 0xFF5B6B50.toInt() else 0xFF333333.toInt()
+                )
+                item.txtValue.text = getString(
+                    R.string.stats_daily_value,
+                    DateUtils.formatDuration(stat.readMs),
+                    getString(
+                        R.string.stats_value_chars,
+                        DateUtils.formatCount(stat.chars.toLong())
+                    )
+                )
+            }
+            binding.statsRecentContainer.addView(item.root)
+            if (index < days.lastIndex) addDivider(binding.statsRecentContainer)
         }
     }
 
-    private fun renderTop(top: List<Pair<String, Long>>) {
+    private fun renderTop(top: List<TopBook>) {
         binding.statsTopContainer.removeAllViews()
         if (top.isEmpty()) {
-            binding.statsTopContainer.addView(smallText(getString(R.string.stats_none)))
+            addEmptyText(binding.statsTopContainer)
             return
         }
-        top.forEach {
-            binding.statsTopContainer.addView(
-                smallText("${it.first}    ${DateUtils.formatTime(it.second)}")
+        top.forEachIndexed { index, book ->
+            val item = ItemStatsBookBinding.inflate(
+                layoutInflater,
+                binding.statsTopContainer,
+                false
             )
+            item.txtRank.text = getString(R.string.stats_rank, index + 1)
+            item.txtTitle.text = book.title
+            item.txtTime.text = DateUtils.formatDuration(book.readMs)
+            binding.statsTopContainer.addView(item.root)
+            if (index < top.lastIndex) addDivider(binding.statsTopContainer)
         }
     }
 
-    private fun smallText(text: String): TextView = TextView(this).apply {
-        this.text = text
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-        setTextColor(0xFF666666.toInt())
-        layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = (6 * resources.displayMetrics.density).toInt() }
+    private fun addDivider(container: LinearLayout) {
+        container.addView(View(this).apply {
+            setBackgroundColor(0xFFE6E6E6.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (1 * resources.displayMetrics.density).toInt()
+            )
+        })
+    }
+
+    private fun addEmptyText(container: LinearLayout) {
+        container.addView(TextView(this).apply {
+            setText(R.string.stats_none)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextColor(0xFF999999.toInt())
+            setPadding(0, (12 * resources.displayMetrics.density).toInt(), 0, 0)
+        })
+    }
+
+    private fun confirmClearStats() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.stats_clear_title)
+            .setMessage(R.string.stats_clear_message)
+            .setPositiveButton(R.string.stats_clear) { _, _ ->
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { repo.clearStats() }
+                    loadStats()
+                    Toast.makeText(
+                        this@SettingsActivity,
+                        R.string.stats_cleared,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 }

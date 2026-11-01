@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -16,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.captainivy.ebookreader.App
 import com.captainivy.ebookreader.R
@@ -94,9 +96,9 @@ class ReaderActivity : AppCompatActivity() {
     private var lastWidth = 0
     private var lastHeight = 0
 
-    private var sessionStartMs = 0L
-    private var lastOffset = -1
-    private var sessionChars = 0
+    private var sessionStartElapsed = 0L
+    private var sessionActive = false
+    private var progress: ReadingProgress? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,6 +124,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         applyLeftHandIndicator()
+        startSessionIfReady()
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -130,7 +133,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        saveReadingState()
+        flushReadingState()
     }
 
     override fun onDestroy() {
@@ -143,23 +146,12 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        val alt = event?.isAltPressed == true
-        return when (keyCode) {
-            // 向前翻页
-            KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_DPAD_DOWN,
-            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+        return when {
+            keyCode in prefs.nextPageKeys -> {
                 nextPage(); true
             }
-            // 向后翻页
-            KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_DPAD_UP,
-            KeyEvent.KEYCODE_VOLUME_UP -> {
+            keyCode in prefs.prevPageKeys -> {
                 prevPage(); true
-            }
-            KeyEvent.KEYCODE_SPACE -> {
-                if (alt) prevPage() else nextPage()
-                true
             }
             else -> super.onKeyDown(keyCode, event)
         }
@@ -228,7 +220,8 @@ class ReaderActivity : AppCompatActivity() {
             val chapterStart = chapters[pendingChapter].charStart
             pendingOffset = (b.currentOffset - chapterStart).coerceAtLeast(0)
             bookReady = true
-            sessionStartMs = System.currentTimeMillis()
+            progress = ReadingProgress(b.maxReadOffset)
+            startSessionIfReady()
             maybeStartReading()
             applyStoredBrightness()
         }
@@ -264,8 +257,11 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun layoutConfig(w: Int, h: Int): LayoutConfig {
-        val density = resources.displayMetrics.scaledDensity
-        val sizePx = prefs.fontSizeSp * density
+        val sizePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP,
+            prefs.fontSizeSp,
+            resources.displayMetrics
+        )
         return LayoutConfig(
             typeface = FontManager.typeface(prefs.fontFamily),
             textSizePx = sizePx,
@@ -400,7 +396,7 @@ class ReaderActivity : AppCompatActivity() {
         val off = l.offsetForPage(page)
         val title = chapters.getOrNull(chapterIndex)?.title.orEmpty()
         binding.readerView.showPage(l, page, title, progressText(off))
-        updateSessionOffset(off)
+        updateSessionOffset(off, pageTurn)
         if (pageTurn) {
             val full = maybeClearGhosting()
             if (einkRefresh.available) {
@@ -436,14 +432,9 @@ class ReaderActivity : AppCompatActivity() {
         return String.format(Locale.US, "%.1f%%", p * 100f)
     }
 
-    private fun updateSessionOffset(off: Int) {
+    private fun updateSessionOffset(off: Int, countNew: Boolean) {
         val overall = (chapters.getOrNull(chapterIndex)?.charStart ?: 0) + off
-        if (lastOffset < 0) {
-            lastOffset = overall
-            return
-        }
-        if (overall > lastOffset) sessionChars += overall - lastOffset
-        lastOffset = overall
+        progress?.onPosition(overall, countNew)
     }
 
     // ------------------------------------------------------------- navigation
@@ -504,18 +495,40 @@ class ReaderActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ save
 
-    private fun saveReadingState() {
-        if (book == null) return
-        val l = layout ?: return
+    /** 仅在阅读器处于前台且书籍已就绪时开始/恢复计时 */
+    private fun startSessionIfReady() {
+        if (sessionActive || !bookReady) return
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        sessionStartElapsed = SystemClock.elapsedRealtime()
+        sessionActive = true
+    }
+
+    /** 保存阅读位置，并记录本次前台阅读时长与新内容字数 */
+    private fun flushReadingState() {
+        val p = progress
+        val l = layout
+        if (p == null || l == null) {
+            sessionActive = false
+            return
+        }
+        if (!sessionActive) return
+        sessionActive = false
+
+        val now = SystemClock.elapsedRealtime()
+        val readMs = (now - sessionStartElapsed).coerceAtLeast(0)
         val off = currentOffset()
         val overall = (chapters.getOrNull(chapterIndex)?.charStart ?: 0) + off
         val atEnd = chapterIndex >= chapters.size - 1 && page >= l.pageCount - 1
-        repo.savePosition(bookId, chapterIndex, overall, atEnd)
-        val now = System.currentTimeMillis()
-        repo.recordReading(bookId, now - sessionStartMs, sessionChars)
-        sessionStartMs = now
-        sessionChars = 0
-        lastOffset = -1
+        val chars = p.takeChars()
+        repo.saveReadingSession(
+            bookId = bookId,
+            chapter = chapterIndex,
+            offset = overall,
+            maxReadOffset = p.maxOffset,
+            finished = atEnd,
+            readMs = readMs,
+            chars = chars
+        )
     }
 
     // --------------------------------------------------------------- dialogs

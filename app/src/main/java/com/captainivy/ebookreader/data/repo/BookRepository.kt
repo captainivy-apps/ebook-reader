@@ -6,8 +6,10 @@ import com.captainivy.ebookreader.data.db.AppDatabase
 import com.captainivy.ebookreader.data.db.BookDao
 import com.captainivy.ebookreader.data.model.Book
 import com.captainivy.ebookreader.data.model.Chapter
-import com.captainivy.ebookreader.data.model.ReadingStat
+import com.captainivy.ebookreader.data.model.DailyReadingStat
+import com.captainivy.ebookreader.data.model.StatsSummary
 import com.captainivy.ebookreader.data.model.TocItem
+import com.captainivy.ebookreader.data.model.TopBook
 import com.captainivy.ebookreader.util.DateUtils
 import java.io.File
 
@@ -34,8 +36,26 @@ class BookRepository(context: Context, db: AppDatabase) {
     fun insert(book: Book, chapters: List<Chapter>, toc: List<TocItem>): Long =
         dao.insertBook(book, chapters, toc)
 
-    fun savePosition(bookId: Long, chapter: Int, offset: Int, finished: Boolean) {
-        dao.updateReadingPosition(bookId, chapter, offset, finished, System.currentTimeMillis())
+    fun saveReadingSession(
+        bookId: Long,
+        chapter: Int,
+        offset: Int,
+        maxReadOffset: Int,
+        finished: Boolean,
+        readMs: Long,
+        chars: Int
+    ) {
+        dao.saveReadingSession(
+            bookId = bookId,
+            chapter = chapter,
+            offset = offset,
+            maxReadOffset = maxReadOffset,
+            finished = finished,
+            at = System.currentTimeMillis(),
+            day = DateUtils.today(),
+            readMs = readMs,
+            chars = chars
+        )
     }
 
     fun delete(ids: List<Long>) {
@@ -52,15 +72,11 @@ class BookRepository(context: Context, db: AppDatabase) {
 
     // ---------------------------------------------------------------- stats
 
-    fun recordReading(bookId: Long, readMs: Long, chars: Int) {
-        dao.addReadingStat(bookId, DateUtils.today(), readMs, chars)
-    }
+    fun statsSummary(): StatsSummary = dao.statsSummary()
 
-    fun totalReadingMs(): Long = dao.totalReadingMs()
+    fun dailyStatsSince(sinceDay: String): List<DailyReadingStat> = dao.dailyStatsSince(sinceDay)
 
-    fun totalReadChars(): Int = dao.totalReadChars()
+    fun topBooksByTime(limit: Int): List<TopBook> = dao.topBooksByTime(limit)
 
-    fun recentDailyStats(limit: Int): List<ReadingStat> = dao.recentDailyStats(limit)
-
-    fun topBooksByTime(limit: Int): List<Pair<Long, Long>> = dao.topBooksByTime(limit)
+    fun clearStats() = dao.clearStats()
 }

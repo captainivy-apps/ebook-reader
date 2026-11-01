@@ -66,7 +66,36 @@
     <string name="refresh_interval_every">每页全刷（最清晰）</string>
     <string name="refresh_interval_every_n">每 %1$d 页全刷</string>
     <string name="settings_keyboard_section">键盘翻页</string>
-    <string name="settings_keyboard_hint">连接键盘后可使用以下按键翻页：\n· 右方向键 / 下方向键：向前翻页\n· 左方向键 / 上方向键：向后翻页\n· 空格：向前翻页\n· Alt + 空格：向后翻页</string>
+    <string name="settings_keyboard_hint">连接键盘或使用设备实体按键翻页。点击下方项目可自定义按键，支持多个按键，也可清空或新增。</string>
+    <string name="settings_page_next">向前翻页按键</string>
+    <string name="settings_page_prev">向后翻页按键</string>
+    <string name="page_keys_none">未设置</string>
+    <string name="page_keys_add">添加按键</string>
+    <string name="page_keys_clear">清空</string>
+    <string name="page_keys_close">关闭</string>
+    <string name="page_keys_delete">删除</string>
+    <string name="page_keys_capture_title">添加按键</string>
+    <string name="page_keys_capture_hint">请按下要设置的按键\n（按返回键取消）</string>
+    <string name="page_keys_empty_hint">尚未设置按键，点击「添加按键」录入</string>
+    <string name="page_keys_duplicate_same">该按键已存在</string>
+    <string name="page_keys_duplicate_other">该按键已用于%1$s</string>
+    <string name="page_keys_added">已添加：%1$s</string>
+    <string name="page_keys_cleared">已清空</string>
+
+    <string name="key_dpad_up">上方向键</string>
+    <string name="key_dpad_down">下方向键</string>
+    <string name="key_dpad_left">左方向键</string>
+    <string name="key_dpad_right">右方向键</string>
+    <string name="key_volume_up">音量＋</string>
+    <string name="key_volume_down">音量－</string>
+    <string name="key_space">空格</string>
+    <string name="key_enter">回车</string>
+    <string name="key_page_up">Page Up</string>
+    <string name="key_page_down">Page Down</string>
+    <string name="key_escape">Esc</string>
+    <string name="key_tab">Tab</string>
+    <string name="key_menu">菜单</string>
+    <string name="key_back">返回</string>
     <string name="settings_font_section">字体</string>
     <string name="settings_font_download">下载字体</string>
     <string name="settings_font_import">导入本地字体</string>
@@ -88,11 +117,23 @@
     <string name="notification_denied">未授予通知权限，上传服务可能无法稳定运行</string>
 
     <string name="settings_stats_section">阅读统计</string>
-    <string name="settings_stats_recent">最近阅读</string>
+    <string name="settings_stats_recent">最近 7 天</string>
     <string name="settings_stats_top">读得最多的书</string>
-    <string name="stats_summary">共 %1$d 本书</string>
-    <string name="stats_total_time">总阅读时长：%1$s</string>
-    <string name="stats_total_chars">累计阅读字数：%1$d</string>
+    <string name="settings_stats_total_time">总阅读时长</string>
+    <string name="settings_stats_total_chars">累计阅读字数</string>
+    <string name="settings_stats_days">阅读天数</string>
+    <string name="settings_stats_books">有记录书籍</string>
+    <string name="settings_stats_empty">还没有阅读记录，开始阅读后会在这里显示统计</string>
+    <string name="stats_no_record">无记录</string>
+    <string name="stats_value_chars">%1$s 字</string>
+    <string name="stats_value_books">%1$d 本</string>
+    <string name="stats_value_days">%1$d 天</string>
+    <string name="stats_daily_value">%1$s · %2$s</string>
+    <string name="stats_rank">%1$d</string>
+    <string name="stats_clear">清空阅读统计</string>
+    <string name="stats_clear_title">清空阅读统计</string>
+    <string name="stats_clear_message">确定清空全部阅读时长与字数记录吗？此操作不可撤销，阅读进度不会被重置。</string>
+    <string name="stats_cleared">阅读统计已清空</string>
     <string name="stats_none">暂无数据</string>
 
     <!-- 上传服务 -->

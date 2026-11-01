@@ -15,6 +15,8 @@ data class Book(
     val totalChars: Int,
     val currentChapter: Int,
     val currentOffset: Int,
+    /** 历史最大阅读位置（用于只统计新内容的阅读字数） */
+    val maxReadOffset: Int = 0,
     val finished: Boolean
 ) {
     /** 阅读进度 0f..1f */
@@ -45,11 +47,25 @@ data class TocItem(
     val anchor: String? = null
 )
 
-/** 阅读统计（按天、按书聚合） */
-data class ReadingStat(
-    val id: Long = 0,
-    val bookId: Long,
+/** 阅读统计汇总 */
+data class StatsSummary(
+    val totalMs: Long,
+    val totalChars: Int,
+    val dayCount: Int,
+    val bookCount: Int
+)
+
+/** 某一天的阅读统计（按天聚合） */
+data class DailyReadingStat(
     val day: String,
     val readMs: Long,
-    val chars: Int
+    val chars: Int,
+    val bookCount: Int
+)
+
+/** 读得最多的书 */
+data class TopBook(
+    val bookId: Long,
+    val title: String,
+    val readMs: Long
 )

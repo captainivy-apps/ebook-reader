@@ -24,6 +24,7 @@ class AppDatabase(context: Context) :
                 ${DbContract.Books.TOTAL_CHARS} INTEGER NOT NULL DEFAULT 0,
                 ${DbContract.Books.CURRENT_CHAPTER} INTEGER NOT NULL DEFAULT 0,
                 ${DbContract.Books.CURRENT_OFFSET} INTEGER NOT NULL DEFAULT 0,
+                ${DbContract.Books.MAX_READ_OFFSET} INTEGER NOT NULL DEFAULT 0,
                 ${DbContract.Books.FINISHED} INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
@@ -87,6 +88,20 @@ class AppDatabase(context: Context) :
                     "${DbContract.Toc.ANCHOR} TEXT"
             )
         }
+        // v3：记录历史最大阅读位置，用于“仅统计新内容”的阅读字数。
+        // 旧书以当前进度作为基线，已读完的书以总字数作为基线。
+        if (oldVersion < 3) {
+            db.execSQL(
+                "ALTER TABLE ${DbContract.Books.TABLE} ADD COLUMN " +
+                    "${DbContract.Books.MAX_READ_OFFSET} INTEGER NOT NULL DEFAULT 0"
+            )
+            db.execSQL(
+                "UPDATE ${DbContract.Books.TABLE} SET ${DbContract.Books.MAX_READ_OFFSET} = " +
+                    "CASE WHEN ${DbContract.Books.FINISHED} != 0 " +
+                    "THEN ${DbContract.Books.TOTAL_CHARS} " +
+                    "ELSE ${DbContract.Books.CURRENT_OFFSET} END"
+            )
+        }
     }
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -96,6 +111,6 @@ class AppDatabase(context: Context) :
 
     companion object {
         private const val DB_NAME = "ebook_reader.db"
-        private const val DB_VERSION = 2
+        private const val DB_VERSION = 3
     }
 }
