@@ -36,6 +36,20 @@ class BookRepository(context: Context, db: AppDatabase) {
     fun insert(book: Book, chapters: List<Chapter>, toc: List<TocItem>): Long =
         dao.insertBook(book, chapters, toc)
 
+    // ------------------------------------------------- char-basis migration
+
+    fun bookIdsNeedingCharMigration(): List<Long> = dao.bookIdsNeedingCharMigration()
+
+    fun applyCharLayout(
+        bookId: Long,
+        chapters: List<Chapter>,
+        totalChars: Int,
+        currentOffset: Int,
+        maxReadOffset: Int
+    ) = dao.applyCharLayout(bookId, chapters, totalChars, currentOffset, maxReadOffset)
+
+    fun markCharLayoutCurrent(bookId: Long) = dao.markCharLayoutCurrent(bookId)
+
     fun saveReadingSession(
         bookId: Long,
         chapter: Int,

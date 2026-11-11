@@ -1,7 +1,44 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+// ---------------------------------------------------------------------------
+// 版本号：小版本号（patch）在每次 release 构建时自动 +1，并持久化到 version.properties
+// ---------------------------------------------------------------------------
+val versionFile = rootProject.file("version.properties")
+val versionProps = Properties().apply {
+    if (versionFile.exists()) versionFile.inputStream().use { load(it) }
+}
+var vMajor = versionProps.getProperty("major", "0").toIntOrNull() ?: 0
+var vMinor = versionProps.getProperty("minor", "0").toIntOrNull() ?: 0
+var vPatch = versionProps.getProperty("patch", "1").toIntOrNull() ?: 1
+
+val requestedTaskNames = gradle.startParameter.taskNames
+    .map { it.substringAfterLast(':').lowercase(Locale.ROOT) }
+val buildsRelease = requestedTaskNames.any { task ->
+    task.contains("release") || task == "build" || task == "assemble" || task == "bundle"
+}
+
+if (buildsRelease) {
+    vPatch += 1
+    versionProps.setProperty("major", vMajor.toString())
+    versionProps.setProperty("minor", vMinor.toString())
+    versionProps.setProperty("patch", vPatch.toString())
+    versionFile.outputStream().use {
+        versionProps.store(it, "Auto-incremented on each release build")
+    }
+}
+
+val appVersionName = "$vMajor.$vMinor.$vPatch"
+val appVersionCode = vMajor * 1_000_000 + vMinor * 10_000 + vPatch
+val buildTimestamp =
+    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
 
 android {
     namespace = "com.captainivy.ebookreader"
@@ -11,9 +48,12 @@ android {
         applicationId = "com.captainivy.ebookreader"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.0.1"
+        versionCode = appVersionCode
+        versionName = appVersionName
         vectorDrawables { useSupportLibrary = true }
+
+        // 构建时间戳，供设置页展示
+        buildConfigField("String", "BUILD_TIME", "\"$buildTimestamp\"")
     }
 
     buildTypes {
@@ -37,6 +77,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     packaging {

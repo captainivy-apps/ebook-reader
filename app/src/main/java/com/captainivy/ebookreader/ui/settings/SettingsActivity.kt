@@ -21,6 +21,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.captainivy.ebookreader.App
+import com.captainivy.ebookreader.BuildConfig
 import com.captainivy.ebookreader.R
 import com.captainivy.ebookreader.data.FontManager
 import com.captainivy.ebookreader.data.model.DailyReadingStat
@@ -92,6 +93,12 @@ class SettingsActivity : AppCompatActivity() {
         updateRefreshIntervalUi()
         updatePageKeyUi()
         updateFontCount()
+
+        binding.txtVersion.text = getString(
+            R.string.settings_version_info,
+            BuildConfig.VERSION_NAME,
+            BuildConfig.BUILD_TIME
+        )
     }
 
     override fun onResume() {

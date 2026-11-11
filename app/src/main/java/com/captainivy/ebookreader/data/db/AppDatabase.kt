@@ -25,7 +25,8 @@ class AppDatabase(context: Context) :
                 ${DbContract.Books.CURRENT_CHAPTER} INTEGER NOT NULL DEFAULT 0,
                 ${DbContract.Books.CURRENT_OFFSET} INTEGER NOT NULL DEFAULT 0,
                 ${DbContract.Books.MAX_READ_OFFSET} INTEGER NOT NULL DEFAULT 0,
-                ${DbContract.Books.FINISHED} INTEGER NOT NULL DEFAULT 0
+                ${DbContract.Books.FINISHED} INTEGER NOT NULL DEFAULT 0,
+                ${DbContract.Books.CHARS_VERSION} INTEGER NOT NULL DEFAULT ${DbContract.CHARS_SCHEMA_VERSION}
             )
             """.trimIndent()
         )
@@ -102,6 +103,13 @@ class AppDatabase(context: Context) :
                     "ELSE ${DbContract.Books.CURRENT_OFFSET} END"
             )
         }
+        // v4：统一字符基准（解析后 TextBlock 长度）。旧书默认 0，由后台迁移重算后置为当前版本。
+        if (oldVersion < 4) {
+            db.execSQL(
+                "ALTER TABLE ${DbContract.Books.TABLE} ADD COLUMN " +
+                    "${DbContract.Books.CHARS_VERSION} INTEGER NOT NULL DEFAULT 0"
+            )
+        }
     }
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -111,6 +119,6 @@ class AppDatabase(context: Context) :
 
     companion object {
         private const val DB_NAME = "ebook_reader.db"
-        private const val DB_VERSION = 3
+        private const val DB_VERSION = 4
     }
 }

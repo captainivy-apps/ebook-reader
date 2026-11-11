@@ -20,7 +20,13 @@ object DbContract {
         const val CURRENT_OFFSET = "current_offset"
         const val MAX_READ_OFFSET = "max_read_offset"
         const val FINISHED = "finished"
+
+        /** 字符基准版本：0=旧的 body.text 基准，当前版本=解析后 TextBlock 基准 */
+        const val CHARS_VERSION = "chars_version"
     }
+
+    /** 当前字符基准版本号 */
+    const val CHARS_SCHEMA_VERSION = 1
 
     object Chapters {
         const val TABLE = "chapters"

@@ -75,10 +75,16 @@ class ChapterContentParser {
         return ChapterContent(out, plainLength, anchors)
     }
 
-    /** 仅统计纯文本长度，用于导入时计算进度分母 */
+    /**
+     * 统计纯文本长度，用于导入时计算进度分母。
+     *
+     * 必须与阅读器排版时的字符基准一致：这里直接复用 [parse] 的 [ChapterContent.plainLength]，
+     * 而不是 `body.text().length`。否则章节起点/总字数（body.text 基准）与页内偏移
+     * （TextBlock 基准）混用，会导致阅读进度百分比系统性偏低。
+     */
     fun countChars(xhtml: String): Int {
-        val body = Jsoup.parse(xhtml).body() ?: return 0
-        return body.text().length
+        if (xhtml.isBlank()) return 0
+        return parse(xhtml, "", null, 0).plainLength
     }
 
     /**

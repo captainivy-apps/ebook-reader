@@ -136,6 +136,9 @@
     <string name="stats_cleared">阅读统计已清空</string>
     <string name="stats_none">暂无数据</string>
 
+    <!-- 版本信息 -->
+    <string name="settings_version_info">版本 %1$s\n构建时间 %2$s</string>
+
     <!-- 上传服务 -->
     <string name="upload_channel_name">上传服务</string>
     <string name="upload_notification_title">局域网上传服务运行中</string>

@@ -71,6 +71,59 @@ class BookDao(private val helper: AppDatabase) {
         db.query(Books.TABLE, null, "${Books.ID}=?", arrayOf(id.toString()), null, null, null)
             .use { c -> if (c.moveToFirst()) c.toBook() else null }
 
+    // -------------------------------------------------- char-basis migration
+
+    /** 尚未完成字符基准迁移的书籍 id */
+    fun bookIdsNeedingCharMigration(): List<Long> =
+        db.query(
+            Books.TABLE,
+            arrayOf(Books.ID),
+            "${Books.CHARS_VERSION} < ?",
+            arrayOf(DbContract.CHARS_SCHEMA_VERSION.toString()),
+            null, null, "${Books.ID} ASC"
+        ).use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }
+
+    /** 原子写回重算后的章节字符区间与书籍进度，并标记字符基准已升级 */
+    fun applyCharLayout(
+        bookId: Long,
+        chapters: List<Chapter>,
+        totalChars: Int,
+        currentOffset: Int,
+        maxReadOffset: Int
+    ) {
+        val database = db
+        database.beginTransaction()
+        try {
+            chapters.forEach { c ->
+                val values = ContentValues().apply {
+                    put(Chapters.CHAR_START, c.charStart)
+                    put(Chapters.CHAR_COUNT, c.charCount)
+                }
+                database.update(
+                    Chapters.TABLE, values, "${Chapters.ID}=?", arrayOf(c.id.toString())
+                )
+            }
+            val bookValues = ContentValues().apply {
+                put(Books.TOTAL_CHARS, totalChars)
+                put(Books.CURRENT_OFFSET, currentOffset)
+                put(Books.MAX_READ_OFFSET, maxReadOffset)
+                put(Books.CHARS_VERSION, DbContract.CHARS_SCHEMA_VERSION)
+            }
+            database.update(Books.TABLE, bookValues, "${Books.ID}=?", arrayOf(bookId.toString()))
+            database.setTransactionSuccessful()
+        } finally {
+            database.endTransaction()
+        }
+    }
+
+    /** 无需重算（如空书）时直接标记为当前基准，避免每次启动重复尝试 */
+    fun markCharLayoutCurrent(bookId: Long) {
+        val values = ContentValues().apply {
+            put(Books.CHARS_VERSION, DbContract.CHARS_SCHEMA_VERSION)
+        }
+        db.update(Books.TABLE, values, "${Books.ID}=?", arrayOf(bookId.toString()))
+    }
+
     fun updateReadingPosition(
         bookId: Long,
         chapter: Int,
@@ -275,6 +328,8 @@ class BookDao(private val helper: AppDatabase) {
         put(Books.CURRENT_OFFSET, currentOffset)
         put(Books.MAX_READ_OFFSET, maxReadOffset)
         put(Books.FINISHED, if (finished) 1 else 0)
+        // 新导入的书直接使用当前字符基准
+        put(Books.CHARS_VERSION, DbContract.CHARS_SCHEMA_VERSION)
     }
 
     private fun Chapter.toValues() = ContentValues().apply {
@@ -312,7 +367,8 @@ class BookDao(private val helper: AppDatabase) {
         currentChapter = getInt(getColumnIndexOrThrow(Books.CURRENT_CHAPTER)),
         currentOffset = getInt(getColumnIndexOrThrow(Books.CURRENT_OFFSET)),
         maxReadOffset = getInt(getColumnIndexOrThrow(Books.MAX_READ_OFFSET)),
-        finished = getInt(getColumnIndexOrThrow(Books.FINISHED)) != 0
+        finished = getInt(getColumnIndexOrThrow(Books.FINISHED)) != 0,
+        charsVersion = getInt(getColumnIndexOrThrow(Books.CHARS_VERSION))
     )
 
     private fun Cursor.toChapter() = Chapter(

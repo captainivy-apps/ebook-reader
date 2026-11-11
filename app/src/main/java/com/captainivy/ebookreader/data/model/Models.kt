@@ -17,7 +17,9 @@ data class Book(
     val currentOffset: Int,
     /** 历史最大阅读位置（用于只统计新内容的阅读字数） */
     val maxReadOffset: Int = 0,
-    val finished: Boolean
+    val finished: Boolean,
+    /** 字符基准版本（见 DbContract.CHARS_SCHEMA_VERSION），用于判断是否需要迁移 */
+    val charsVersion: Int = 0
 ) {
     /** 阅读进度 0f..1f */
     val progress: Float

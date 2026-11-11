@@ -1,5 +1,6 @@
 package com.captainivy.ebookreader.ui.reader.layout
 
+import android.annotation.SuppressLint
 import android.graphics.Typeface
 import android.os.Build
 import android.text.Layout
@@ -126,6 +127,9 @@ class Paginator {
         return ChapterLayout(blocks, layouts, pages, width, height)
     }
 
+    // Layout.JUSTIFICATION_MODE_INTER_WORD 是 API 26 起 StaticLayout.Builder.setJustificationMode
+    // 的合法取值；新版 lint 的签名库只认 API 29 的 LineBreaker 常量，属误报。
+    @SuppressLint("WrongConstant")
     private fun buildTextLayout(block: TextBlock, config: LayoutConfig, width: Int): StaticLayout {
         val size = config.textSizePx * scaleFor(block.style)
         val typeface = if (block.style in HEADING_STYLES) {

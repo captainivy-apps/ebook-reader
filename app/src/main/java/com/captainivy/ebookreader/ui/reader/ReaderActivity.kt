@@ -30,6 +30,7 @@ import com.captainivy.ebookreader.data.epub.NoteResolver
 import com.captainivy.ebookreader.data.epub.Block
 import com.captainivy.ebookreader.data.epub.TextBlock
 import com.captainivy.ebookreader.data.epub.TextStyle
+import com.captainivy.ebookreader.data.migration.CharCountMigration
 import com.captainivy.ebookreader.data.model.Book
 import com.captainivy.ebookreader.data.model.Chapter
 import com.captainivy.ebookreader.data.model.TocItem
@@ -53,6 +54,7 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var binding: ActivityReaderBinding
     private val repo by lazy { App.get().repository }
     private val prefs by lazy { App.get().prefs }
+    private val charMigration by lazy { CharCountMigration(repo) }
 
     private var bookId = 0L
     private var book: Book? = null
@@ -100,6 +102,21 @@ class ReaderActivity : AppCompatActivity() {
     private var sessionActive = false
     private var progress: ReadingProgress? = null
 
+    /** 位置增量落库任务（翻页后去抖合并） */
+    private var persistJob: Job? = null
+
+    /** 位置写入串行化：seq 越大越新，避免去抖任务用旧值覆盖新值 */
+    private val positionLock = Any()
+    private var positionSeq = 0L
+    private var writtenSeq = 0L
+
+    private data class PositionSnapshot(
+        val chapter: Int,
+        val offset: Int,
+        val maxReadOffset: Int,
+        val finished: Boolean
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         bookId = intent.getLongExtra(EXTRA_BOOK_ID, 0L)
@@ -136,8 +153,15 @@ class ReaderActivity : AppCompatActivity() {
         flushReadingState()
     }
 
+    override fun onStop() {
+        super.onStop()
+        // 兜底：即使 onPause 因设备休眠等原因未可靠执行，也再落一次位置
+        flushReadingState()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        persistJob?.cancel()
         loadJob?.cancel()
         prefetchJob?.cancel()
         chapterCache.clear()
@@ -192,6 +216,8 @@ class ReaderActivity : AppCompatActivity() {
     private fun loadBook() {
         lifecycleScope.launch {
             val loaded = withContext(Dispatchers.IO) {
+                // 先确保本书字符基准已迁移，避免旧基准的 charStart 与新基准的页内偏移混用
+                charMigration.migrateBook(bookId)
                 val b = repo.get(bookId)
                 val ch = repo.chapters(bookId)
                 val toc = repo.toc(bookId)
@@ -397,6 +423,7 @@ class ReaderActivity : AppCompatActivity() {
         val title = chapters.getOrNull(chapterIndex)?.title.orEmpty()
         binding.readerView.showPage(l, page, title, progressText(off))
         updateSessionOffset(off, pageTurn)
+        schedulePersistPosition()
         if (pageTurn) {
             val full = maybeClearGhosting()
             if (einkRefresh.available) {
@@ -462,6 +489,8 @@ class ReaderActivity : AppCompatActivity() {
             page++
             render(true)
         } else if (chapterIndex < chapters.size - 1) {
+            // 章节切换是异步的，先把当前可见位置同步落库，避免此窗口内被中断而丢页
+            persistCurrentPositionNow()
             showChapter(chapterIndex + 1, 0, pageTurn = true)
         }
     }
@@ -472,6 +501,7 @@ class ReaderActivity : AppCompatActivity() {
             page--
             render(true)
         } else if (chapterIndex > 0) {
+            persistCurrentPositionNow()
             showChapter(chapterIndex - 1, 0, pageTurn = true, startAtLastPage = true)
         }
     }
@@ -503,32 +533,84 @@ class ReaderActivity : AppCompatActivity() {
         sessionActive = true
     }
 
-    /** 保存阅读位置，并记录本次前台阅读时长与新内容字数 */
+    /**
+     * 保存阅读位置并记录本次前台阅读时长与新内容字数。
+     *
+     * 位置保存不再依赖统计会话是否已开始：即使 [sessionActive] 为 false，
+     * 只要排版已就绪就落库，避免“统计没开始 → 位置也没保存”导致重开滞后。
+     */
     private fun flushReadingState() {
-        val p = progress
         val l = layout
-        if (p == null || l == null) {
+        if (l == null) {
             sessionActive = false
             return
         }
-        if (!sessionActive) return
+        val now = SystemClock.elapsedRealtime()
+        val readMs = if (sessionActive) (now - sessionStartElapsed).coerceAtLeast(0) else 0L
         sessionActive = false
 
-        val now = SystemClock.elapsedRealtime()
-        val readMs = (now - sessionStartElapsed).coerceAtLeast(0)
+        persistJob?.cancel()
+        val chars = progress?.takeChars() ?: 0
+        persistPosition(readMs = readMs, chars = chars, sync = true)
+    }
+
+    /** 翻页/重排后按去抖节奏增量保存位置，降低进程被回收时丢页的范围 */
+    private fun schedulePersistPosition() {
+        persistJob?.cancel()
+        persistJob = lifecycleScope.launch {
+            delay(POSITION_PERSIST_DEBOUNCE_MS)
+            persistPosition(readMs = 0L, chars = 0, sync = false)
+        }
+    }
+
+    /** 章节切换前同步保存当前可见位置（切换涉及异步排版，存在中断窗口） */
+    private fun persistCurrentPositionNow() {
+        persistJob?.cancel()
+        persistPosition(readMs = 0L, chars = 0, sync = true)
+    }
+
+    private fun currentPositionSnapshot(): PositionSnapshot? {
+        val l = layout ?: return null
         val off = currentOffset()
         val overall = (chapters.getOrNull(chapterIndex)?.charStart ?: 0) + off
         val atEnd = chapterIndex >= chapters.size - 1 && page >= l.pageCount - 1
-        val chars = p.takeChars()
-        repo.saveReadingSession(
-            bookId = bookId,
+        val max = progress?.maxOffset ?: overall
+        return PositionSnapshot(
             chapter = chapterIndex,
             offset = overall,
-            maxReadOffset = p.maxOffset,
-            finished = atEnd,
-            readMs = readMs,
-            chars = chars
+            maxReadOffset = if (max > overall) max else overall,
+            finished = atEnd
         )
+    }
+
+    /**
+     * 写入一次位置快照。用递增序号串行化，保证旧快照不会覆盖更新的位置。
+     * [sync] 为 true 时在当前线程同步写入（用于 pause/stop 等必须立即持久的时机）。
+     */
+    private fun persistPosition(readMs: Long, chars: Int, sync: Boolean) {
+        val snapshot = currentPositionSnapshot() ?: return
+        val seq = synchronized(positionLock) { ++positionSeq }
+        val write = Runnable {
+            synchronized(positionLock) {
+                if (seq > writtenSeq) {
+                    writtenSeq = seq
+                    repo.saveReadingSession(
+                        bookId = bookId,
+                        chapter = snapshot.chapter,
+                        offset = snapshot.offset,
+                        maxReadOffset = snapshot.maxReadOffset,
+                        finished = snapshot.finished,
+                        readMs = readMs,
+                        chars = chars
+                    )
+                }
+            }
+        }
+        if (sync) {
+            write.run()
+        } else {
+            lifecycleScope.launch(Dispatchers.IO) { write.run() }
+        }
     }
 
     // --------------------------------------------------------------- dialogs
@@ -826,6 +908,9 @@ class ReaderActivity : AppCompatActivity() {
         private const val FULL_SETTLE_MS = 700L
 
         private const val MAX_CACHED_CHAPTERS = 3
+
+        /** 翻页后增量保存位置的去抖间隔 */
+        private const val POSITION_PERSIST_DEBOUNCE_MS = 400L
 
         private val HEADING_STYLES = setOf(
             TextStyle.H1, TextStyle.H2, TextStyle.H3,
