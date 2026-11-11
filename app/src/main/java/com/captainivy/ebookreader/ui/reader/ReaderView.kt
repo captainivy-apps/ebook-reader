@@ -48,6 +48,10 @@ class ReaderView @JvmOverloads constructor(
     private var chapterTitle: String = ""
     private var progressText: String = ""
 
+    /** 右上角状态：时间与电量百分比（-1 表示未知，不绘制电池） */
+    private var statusTime: String = ""
+    private var batteryPercent: Int = -1
+
     private var headerBand: Int = 0
     private var footerBand: Int = 0
 
@@ -66,6 +70,16 @@ class ReaderView @JvmOverloads constructor(
         )
         textAlign = Paint.Align.RIGHT
     }
+    private val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics
+        )
+        textAlign = Paint.Align.RIGHT
+    }
+    private val batteryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
+    private val lowBatteryColor = Color.parseColor("#C0392B")
 
     fun setBands(headerPx: Int, footerPx: Int) {
         headerBand = headerPx
@@ -87,6 +101,14 @@ class ReaderView @JvmOverloads constructor(
     fun updateLabels(title: String, progress: String) {
         chapterTitle = title
         progressText = progress
+        invalidate()
+    }
+
+    /** 更新右上角的时间与电量，仅在内容变化时重绘（墨水屏避免无谓刷新） */
+    fun setStatusBar(time: String, batteryPercent: Int) {
+        if (statusTime == time && this.batteryPercent == batteryPercent) return
+        statusTime = time
+        this.batteryPercent = batteryPercent
         invalidate()
     }
 
@@ -172,19 +194,98 @@ class ReaderView @JvmOverloads constructor(
     }
 
     private fun drawLabels(canvas: Canvas) {
-        if (chapterTitle.isNotEmpty()) {
-            val gap = 12f * resources.displayMetrics.density
-            val bandBottom = (headerBand - gap).coerceAtLeast(labelPaint.textSize + 10f)
+        val gap = 12f * resources.displayMetrics.density
+        val bandBottom = (headerBand - gap).coerceAtLeast(labelPaint.textSize + 10f)
+        val baseline = bandBottom - (bandBottom - labelPaint.textSize) / 2f
+
+        val showStatus = statusTime.isNotEmpty() || batteryPercent >= 0
+        if (chapterTitle.isNotEmpty() || showStatus) {
             bgPaint.color = chapterBandColor
             canvas.drawRect(0f, 0f, width.toFloat(), bandBottom, bgPaint)
-            val baseline = bandBottom - (bandBottom - labelPaint.textSize) / 2f
-            canvas.drawText(chapterTitle, paddingLeft.toFloat(), baseline, labelPaint)
         }
+
+        // 右上角状态区域（时间 + 电量）布局
+        val right = (width - paddingRight).toFloat()
+        val batteryW = dp(22f)
+        val batteryH = dp(11f)
+        val nubW = dp(2.5f)
+        val batteryLeft = right - batteryW - nubW
+        val timeRight = if (batteryPercent >= 0) batteryLeft - dp(6f) else right
+        val timeWidth = if (statusTime.isNotEmpty()) timePaint.measureText(statusTime) else 0f
+        val statusLeft = if (statusTime.isNotEmpty()) timeRight - timeWidth else batteryLeft
+
+        // 章节标题裁剪到状态区域左侧，避免与时间/电量重叠
+        if (chapterTitle.isNotEmpty()) {
+            canvas.save()
+            canvas.clipRect(0f, 0f, (statusLeft - dp(8f)).coerceAtLeast(0f), bandBottom)
+            canvas.drawText(chapterTitle, paddingLeft.toFloat(), baseline, labelPaint)
+            canvas.restore()
+        }
+
+        if (showStatus) {
+            if (statusTime.isNotEmpty()) {
+                timePaint.color = labelColor
+                canvas.drawText(statusTime, timeRight, baseline, timePaint)
+            }
+            if (batteryPercent >= 0) {
+                val iconCenterY = baseline - labelPaint.textSize / 2f
+                drawBattery(
+                    canvas, batteryLeft, iconCenterY - batteryH / 2f,
+                    batteryW, batteryH, nubW
+                )
+            }
+        }
+
         if (progressText.isNotEmpty()) {
-            val baseline = height - footerBand + progressPaint.textSize + 6f
-            canvas.drawText(progressText, (width - paddingRight).toFloat(), baseline, progressPaint)
+            val progressBaseline = height - footerBand + progressPaint.textSize + 6f
+            canvas.drawText(
+                progressText, (width - paddingRight).toFloat(), progressBaseline, progressPaint
+            )
         }
     }
+
+    /** 绘制右上角电池图标：外框 + 右侧电极 + 按百分比填充 */
+    private fun drawBattery(
+        canvas: Canvas,
+        left: Float,
+        top: Float,
+        bodyWidth: Float,
+        bodyHeight: Float,
+        nubWidth: Float
+    ) {
+        val percent = batteryPercent.coerceIn(0, 100)
+        val color = if (percent <= 15) lowBatteryColor else labelColor
+
+        batteryPaint.color = color
+        batteryPaint.style = Paint.Style.STROKE
+        batteryPaint.strokeWidth = dp(1.2f)
+        val radius = dp(2.5f)
+        canvas.drawRoundRect(
+            left, top, left + bodyWidth, top + bodyHeight, radius, radius, batteryPaint
+        )
+
+        // 电极
+        batteryPaint.style = Paint.Style.FILL
+        canvas.drawRoundRect(
+            left + bodyWidth, top + bodyHeight * 0.28f,
+            left + bodyWidth + nubWidth, top + bodyHeight * 0.72f,
+            nubWidth / 2f, nubWidth / 2f, batteryPaint
+        )
+
+        // 电量填充
+        val inset = dp(2f)
+        val fillWidth = (bodyWidth - inset * 2f) * (percent / 100f)
+        if (fillWidth > 0f) {
+            val fillRadius = dp(1f)
+            canvas.drawRoundRect(
+                left + inset, top + inset,
+                left + inset + fillWidth, top + bodyHeight - inset,
+                fillRadius, fillRadius, batteryPaint
+            )
+        }
+    }
+
+    private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_UP) {

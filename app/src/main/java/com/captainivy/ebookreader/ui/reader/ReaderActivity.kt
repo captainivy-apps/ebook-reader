@@ -1,7 +1,10 @@
 package com.captainivy.ebookreader.ui.reader
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.TypedValue
@@ -14,6 +17,7 @@ import android.widget.ArrayAdapter
 import android.widget.SeekBar
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -47,6 +51,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class ReaderActivity : AppCompatActivity() {
@@ -117,6 +123,18 @@ class ReaderActivity : AppCompatActivity() {
         val finished: Boolean
     )
 
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private var batteryPercent = -1
+    private var statusReceiverRegistered = false
+    private var clockJob: Job? = null
+
+    private val batteryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            batteryPercent = parseBatteryPercent(intent)
+            updateStatusBar()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         bookId = intent.getLongExtra(EXTRA_BOOK_ID, 0L)
@@ -142,6 +160,7 @@ class ReaderActivity : AppCompatActivity() {
         super.onResume()
         applyLeftHandIndicator()
         startSessionIfReady()
+        startStatusUpdates()
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -150,6 +169,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        stopStatusUpdates()
         flushReadingState()
     }
 
@@ -462,6 +482,57 @@ class ReaderActivity : AppCompatActivity() {
     private fun updateSessionOffset(off: Int, countNew: Boolean) {
         val overall = (chapters.getOrNull(chapterIndex)?.charStart ?: 0) + off
         progress?.onPosition(overall, countNew)
+    }
+
+    // ------------------------------------------------------------ status bar
+
+    /** 注册电量监听并按分钟刷新右上角时间（HH:mm） */
+    private fun startStatusUpdates() {
+        if (!statusReceiverRegistered) {
+            try {
+                ContextCompat.registerReceiver(
+                    this,
+                    batteryReceiver,
+                    IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                    ContextCompat.RECEIVER_NOT_EXPORTED
+                )
+                statusReceiverRegistered = true
+            } catch (_: Exception) {
+            }
+        }
+        clockJob?.cancel()
+        clockJob = lifecycleScope.launch {
+            while (isActive) {
+                updateStatusBar()
+                // 对齐到下一个整分钟，避免无意义的频繁重绘
+                val now = System.currentTimeMillis()
+                delay(60_000L - now % 60_000L + 50L)
+            }
+        }
+    }
+
+    private fun stopStatusUpdates() {
+        clockJob?.cancel()
+        clockJob = null
+        if (statusReceiverRegistered) {
+            try {
+                unregisterReceiver(batteryReceiver)
+            } catch (_: Exception) {
+            }
+            statusReceiverRegistered = false
+        }
+    }
+
+    private fun updateStatusBar() {
+        binding.readerView.setStatusBar(timeFormat.format(Date()), batteryPercent)
+    }
+
+    private fun parseBatteryPercent(intent: Intent?): Int {
+        if (intent == null) return -1
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        if (level < 0 || scale <= 0) return -1
+        return (level * 100 / scale).coerceIn(0, 100)
     }
 
     // ------------------------------------------------------------- navigation
