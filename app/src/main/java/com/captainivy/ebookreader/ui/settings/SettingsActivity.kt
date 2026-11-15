@@ -24,6 +24,11 @@ import com.captainivy.ebookreader.App
 import com.captainivy.ebookreader.BuildConfig
 import com.captainivy.ebookreader.R
 import com.captainivy.ebookreader.data.FontManager
+import com.captainivy.ebookreader.data.Prefs
+import com.captainivy.ebookreader.data.tts.TtsModelCatalog
+import com.captainivy.ebookreader.data.tts.TtsModelDownloader
+import com.captainivy.ebookreader.data.tts.TtsModelManager
+import com.captainivy.ebookreader.data.tts.TtsModelSpec
 import com.captainivy.ebookreader.data.model.DailyReadingStat
 import com.captainivy.ebookreader.data.model.StatsSummary
 import com.captainivy.ebookreader.data.model.TopBook
@@ -44,6 +49,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -88,11 +94,14 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnFontImport.setOnClickListener { pickFont.launch(arrayOf("*/*")) }
         binding.btnFontUrl.setOnClickListener { showFontUrlDialog() }
         binding.btnClearStats.setOnClickListener { confirmClearStats() }
+        binding.rowTtsEngine.setOnClickListener { showTtsEngineDialog() }
+        binding.rowTtsModels.setOnClickListener { showTtsModelsDialog() }
 
         updateHttpUi()
         updateRefreshIntervalUi()
         updatePageKeyUi()
         updateFontCount()
+        updateTtsUi()
 
         binding.txtVersion.text = getString(
             R.string.settings_version_info,
@@ -106,6 +115,7 @@ class SettingsActivity : AppCompatActivity() {
         updateRefreshIntervalUi()
         updatePageKeyUi()
         updateFontCount()
+        updateTtsUi()
         loadStats()
     }
 
@@ -459,6 +469,273 @@ class SettingsActivity : AppCompatActivity() {
         return contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+        }
+    }
+
+    // ------------------------------------------------------------------- tts
+
+    private fun updateTtsUi() {
+        val engineId = prefs.ttsEngineId
+        binding.txtTtsEngine.text = if (engineId == Prefs.TTS_ENGINE_SYSTEM) {
+            getString(R.string.tts_engine_system)
+        } else {
+            TtsModelCatalog.byId(engineId)?.name ?: getString(R.string.tts_engine_system)
+        }
+        val installed = TtsModelManager.installedModels()
+        val mb = (TtsModelManager.installedBytes() / (1024 * 1024)).toInt()
+        binding.txtTtsModels.text = getString(
+            R.string.tts_models_summary,
+            installed.size,
+            TtsModelCatalog.models.size,
+            mb
+        )
+    }
+
+    private fun showTtsEngineDialog() {
+        val installed = TtsModelManager.installedModels()
+        val labels = ArrayList<String>()
+        val ids = ArrayList<String>()
+        labels.add(getString(R.string.tts_engine_system))
+        ids.add(Prefs.TTS_ENGINE_SYSTEM)
+        installed.forEach {
+            labels.add(it.name)
+            ids.add(it.id)
+        }
+        val current = ids.indexOf(prefs.ttsEngineId).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.tts_engine_dialog_title)
+            .setSingleChoiceItems(labels.toTypedArray(), current) { dialog, which ->
+                prefs.ttsEngineId = ids[which]
+                updateTtsUi()
+                dialog.dismiss()
+                Toast.makeText(this, R.string.tts_engine_changed, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showTtsModelsDialog() {
+        val states = TtsModelDownloader.states.value
+        val labels = TtsModelCatalog.models.map { spec ->
+            val state = states[spec.id]
+            when {
+                state?.done == true || TtsModelManager.isDownloaded(spec) ->
+                    getString(
+                        R.string.tts_model_item,
+                        spec.name,
+                        spec.language,
+                        spec.approxSizeMb,
+                        getString(R.string.tts_status_downloaded)
+                    )
+                state?.error != null ->
+                    getString(
+                        R.string.tts_model_item,
+                        spec.name,
+                        spec.language,
+                        spec.approxSizeMb,
+                        getString(R.string.tts_status_failed)
+                    )
+                state != null ->
+                    getString(
+                        R.string.tts_model_item_downloading,
+                        spec.name,
+                        spec.language,
+                        spec.approxSizeMb,
+                        state.percent
+                    )
+                else ->
+                    getString(
+                        R.string.tts_model_item,
+                        spec.name,
+                        spec.language,
+                        spec.approxSizeMb,
+                        getString(R.string.tts_status_not_downloaded)
+                    )
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.tts_models_title)
+            .setItems(labels.toTypedArray()) { _, which ->
+                onTtsModelClick(TtsModelCatalog.models[which])
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun onTtsModelClick(spec: TtsModelSpec) {
+        if (TtsModelManager.isDownloaded(spec)) {
+            showTtsModelActions(spec)
+            return
+        }
+        if (TtsModelDownloader.isDownloading(spec.id)) {
+            showTtsDownloadProgress(spec)
+            return
+        }
+        TtsModelDownloader.dismissResult(spec.id)
+        showTtsSourceDialog(spec)
+    }
+
+    private fun showTtsModelActions(spec: TtsModelSpec) {
+        val actions = arrayOf(
+            getString(R.string.tts_action_default),
+            getString(R.string.tts_action_delete)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(spec.name)
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> {
+                        prefs.ttsEngineId = spec.id
+                        updateTtsUi()
+                        Toast.makeText(this, R.string.tts_engine_changed, Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> confirmDeleteTtsModel(spec)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showTtsSourceDialog(spec: TtsModelSpec) {
+        val labels = arrayOf(
+            getString(R.string.tts_source_original),
+            getString(R.string.tts_source_mirror)
+        )
+        val current =
+            if (prefs.ttsDownloadSource == Prefs.TTS_SOURCE_ORIGINAL) 0 else 1
+        AlertDialog.Builder(this)
+            .setTitle(R.string.tts_source_title)
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                val source =
+                    if (which == 0) Prefs.TTS_SOURCE_ORIGINAL else Prefs.TTS_SOURCE_MIRROR
+                prefs.ttsDownloadSource = source
+                dialog.dismiss()
+                startTtsDownload(spec, source)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun startTtsDownload(spec: TtsModelSpec, source: String) {
+        if (!TtsModelDownloader.start(spec, source)) {
+            Toast.makeText(this, R.string.tts_already_downloading, Toast.LENGTH_SHORT).show()
+        }
+        showTtsDownloadProgress(spec)
+    }
+
+    private fun showTtsDownloadProgress(spec: TtsModelSpec) {
+        val density = resources.displayMetrics.density
+        val pad = (20 * density).toInt()
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val text = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextColor(0xFF444444.toInt())
+            setLineSpacing(0f, 1.2f)
+        }
+        val bar = android.widget.ProgressBar(
+            this,
+            null,
+            android.R.attr.progressBarStyleHorizontal
+        ).apply {
+            max = 100
+            progress = 0
+        }
+        container.addView(text)
+        container.addView(bar)
+
+        var observeJob: Job? = null
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.tts_download_title, spec.name))
+            .setView(container)
+            .setNegativeButton(R.string.cancel) { _, _ ->
+                TtsModelDownloader.cancel(spec.id)
+                updateTtsUi()
+            }
+            .create()
+        dialog.setCancelable(false)
+        dialog.setOnDismissListener { observeJob?.cancel() }
+        dialog.show()
+
+        observeJob = lifecycleScope.launch {
+            TtsModelDownloader.states.collect { map ->
+                val state = map[spec.id] ?: return@collect
+                bar.progress = state.percent
+                text.text = getString(
+                    R.string.tts_download_progress,
+                    state.fileName.ifBlank { spec.name },
+                    state.percent,
+                    formatSize(state.downloadedBytes),
+                    formatSize(state.totalBytes)
+                )
+                if (state.done) {
+                    TtsModelDownloader.dismissResult(spec.id)
+                    if (dialog.isShowing) dialog.dismiss()
+                    updateTtsUi()
+                    promptSetDefaultTtsEngine(spec)
+                } else if (state.error != null) {
+                    TtsModelDownloader.dismissResult(spec.id)
+                    if (dialog.isShowing) dialog.dismiss()
+                    updateTtsUi()
+                    promptTtsRetry(spec, state.error)
+                }
+            }
+        }
+    }
+
+    private fun promptSetDefaultTtsEngine(spec: TtsModelSpec) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.tts_download_done)
+            .setMessage(getString(R.string.tts_set_default_message, spec.name))
+            .setPositiveButton(R.string.tts_action_default) { _, _ ->
+                prefs.ttsEngineId = spec.id
+                updateTtsUi()
+                Toast.makeText(this, R.string.tts_engine_changed, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun promptTtsRetry(spec: TtsModelSpec, error: String) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.tts_download_failed, error))
+            .setPositiveButton(R.string.tts_retry_other_source) { _, _ ->
+                val other = if (prefs.ttsDownloadSource == Prefs.TTS_SOURCE_ORIGINAL) {
+                    Prefs.TTS_SOURCE_MIRROR
+                } else {
+                    Prefs.TTS_SOURCE_ORIGINAL
+                }
+                prefs.ttsDownloadSource = other
+                startTtsDownload(spec, other)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun confirmDeleteTtsModel(spec: TtsModelSpec) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.tts_delete_title)
+            .setMessage(getString(R.string.tts_delete_message, spec.name))
+            .setPositiveButton(R.string.delete) { _, _ ->
+                TtsModelManager.delete(spec)
+                if (prefs.ttsEngineId == spec.id) {
+                    prefs.ttsEngineId = Prefs.TTS_ENGINE_SYSTEM
+                }
+                updateTtsUi()
+                Toast.makeText(this, R.string.tts_deleted, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun formatSize(bytes: Long): String {
+        val mb = bytes / (1024f * 1024f)
+        return if (mb >= 1f) {
+            String.format(Locale.US, "%.1f MB", mb)
+        } else {
+            String.format(Locale.US, "%.0f KB", bytes / 1024f)
         }
     }
 

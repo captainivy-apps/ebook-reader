@@ -52,11 +52,18 @@ android {
         versionName = appVersionName
         vectorDrawables { useSupportLibrary = true }
 
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+
         // 构建时间戳，供设置页展示
         buildConfigField("String", "BUILD_TIME", "\"$buildTimestamp\"")
     }
 
     buildTypes {
+        debug {
+            ndk { abiFilters += "x86_64" }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -96,6 +103,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("org.jsoup:jsoup:1.17.2")
+    implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1")
+    implementation("org.apache.commons:commons-compress:1.26.2")
 
     testImplementation("junit:junit:4.13.2")
 }

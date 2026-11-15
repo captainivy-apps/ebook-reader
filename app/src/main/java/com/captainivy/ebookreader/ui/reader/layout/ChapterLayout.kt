@@ -39,6 +39,9 @@ class ChapterLayout(
 
     val pageCount: Int get() = pages.size
 
+    /** 块的起始字符偏移（图片等非文本块返回其所在位置偏移） */
+    fun blockOffset(index: Int): Int = blockOffsets.getOrElse(index) { 0 }
+
     /** 字符偏移 -> 页码 */
     fun pageForOffset(offset: Int): Int {
         if (pages.isEmpty()) return 0

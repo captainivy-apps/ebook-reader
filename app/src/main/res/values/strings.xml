@@ -136,6 +136,50 @@
     <string name="stats_cleared">阅读统计已清空</string>
     <string name="stats_none">暂无数据</string>
 
+
+    <!-- 朗读 -->
+    <string name="menu_tts">朗读</string>
+    <string name="tts_not_ready">正文尚未加载完成，请稍后再试</string>
+    <string name="tts_start_failed">朗读启动失败</string>
+    <string name="tts_pause">暂停朗读</string>
+    <string name="tts_resume">继续朗读</string>
+    <string name="tts_rewind">快退一句</string>
+    <string name="tts_forward">快进一句</string>
+    <string name="tts_stop">停止朗读</string>
+    <string name="tts_speed_default">1.0x</string>
+    <string name="tts_loading_short">加载中</string>
+    <string name="tts_expand">展开朗读控制</string>
+
+    <string name="settings_tts_section">朗读</string>
+    <string name="settings_tts_engine">默认朗读引擎</string>
+    <string name="settings_tts_models">朗读模型</string>
+    <string name="settings_tts_hint">离线模型从 sherpa-onnx 官方 GitHub 发布页下载，支持切换到国内 GitHub 加速镜像。Kokoro 体积较大，低配设备合成可能较慢。</string>
+    <string name="tts_engine_system">系统朗读（免下载）</string>
+    <string name="tts_engine_dialog_title">选择默认朗读引擎</string>
+    <string name="tts_models_title">朗读模型</string>
+    <string name="tts_models_summary">已下载 %1$d/%2$d · 占用 %3$d MB</string>
+    <string name="tts_model_item">%1$s · %2$s · 约 %3$d MB · %4$s</string>
+    <string name="tts_model_item_downloading">%1$s · %2$s · 约 %3$d MB · 下载中 %4$d%%</string>
+    <string name="tts_status_downloaded">已下载</string>
+    <string name="tts_status_not_downloaded">未下载</string>
+    <string name="tts_status_failed">下载失败</string>
+    <string name="tts_source_title">选择下载源</string>
+    <string name="tts_source_original">原始地址（GitHub）</string>
+    <string name="tts_source_mirror">国内镜像（GitHub 加速）</string>
+    <string name="tts_download_title">下载 %1$s</string>
+    <string name="tts_download_progress">%1$s\n%2$d%% · %3$s / %4$s</string>
+    <string name="tts_download_done">模型下载完成</string>
+    <string name="tts_set_default_message">是否将「%1$s」设为默认朗读引擎？</string>
+    <string name="tts_download_failed">下载失败：%1$s</string>
+    <string name="tts_retry_other_source">使用另一源重试</string>
+    <string name="tts_delete_title">删除朗读模型</string>
+    <string name="tts_delete_message">确定删除朗读模型「%1$s」吗？删除后需重新下载。</string>
+    <string name="tts_deleted">已删除</string>
+    <string name="tts_action_default">设为默认引擎</string>
+    <string name="tts_action_delete">删除模型</string>
+    <string name="tts_already_downloading">该模型正在下载</string>
+    <string name="tts_engine_changed">已切换默认朗读引擎</string>
+
     <!-- 版本信息 -->
     <string name="settings_version_info">版本 %1$s\n构建时间 %2$s</string>
 

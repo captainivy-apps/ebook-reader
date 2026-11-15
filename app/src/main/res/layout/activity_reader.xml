@@ -65,6 +65,27 @@
             app:tint="#333333" />
     </LinearLayout>
 
+    <ImageButton
+        android:id="@+id/btnTtsCollapsed"
+        android:layout_width="44dp"
+        android:layout_height="52dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_tts_tab"
+        android:contentDescription="@string/tts_expand"
+        android:src="@drawable/ic_tts"
+        android:visibility="gone"
+        app:tint="#333333" />
+
+    <include
+        android:id="@+id/ttsPanel"
+        layout="@layout/view_tts_panel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="12dp"
+        android:layout_marginBottom="16dp" />
+
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
@@ -152,6 +173,33 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
                 android:text="@string/menu_typography"
+                android:textColor="#666666"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnTts"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:contentDescription="@string/menu_tts"
+                android:src="@drawable/ic_tts"
+                app:tint="#333333" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="@string/menu_tts"
                 android:textColor="#666666"
                 android:textSize="11sp" />
         </LinearLayout>

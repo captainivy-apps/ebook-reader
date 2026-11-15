@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
+import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Bundle
 import android.os.SystemClock
@@ -35,6 +37,10 @@ import com.captainivy.ebookreader.data.epub.Block
 import com.captainivy.ebookreader.data.epub.TextBlock
 import com.captainivy.ebookreader.data.epub.TextStyle
 import com.captainivy.ebookreader.data.migration.CharCountMigration
+import com.captainivy.ebookreader.data.tts.TtsController
+import com.captainivy.ebookreader.data.tts.TtsProgress
+import com.captainivy.ebookreader.data.tts.TtsSegment
+import com.captainivy.ebookreader.data.tts.TtsSegmenter
 import com.captainivy.ebookreader.data.model.Book
 import com.captainivy.ebookreader.data.model.Chapter
 import com.captainivy.ebookreader.data.model.TocItem
@@ -44,11 +50,13 @@ import com.captainivy.ebookreader.ui.reader.layout.ChapterLayout
 import com.captainivy.ebookreader.ui.reader.layout.LayoutConfig
 import com.captainivy.ebookreader.ui.reader.layout.Paginator
 import com.captainivy.ebookreader.util.Bitmaps
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.lang.ref.WeakReference
@@ -56,6 +64,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 
 class ReaderActivity : AppCompatActivity() {
 
@@ -110,6 +119,28 @@ class ReaderActivity : AppCompatActivity() {
     private var sessionActive = false
     private var progress: ReadingProgress? = null
 
+    private val tts by lazy { TtsController(this) }
+    private val audioManager by lazy {
+        getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+    private var ttsJob: Job? = null
+    private var ttsRunning = false
+    private var ttsPaused = false
+    private var ttsLoading = false
+    private var ttsSpeed = 1.0f
+    private var ttsChapter = -1
+    private var ttsSegments: List<TtsSegment> = emptyList()
+    private var ttsSegmentIndex = 0
+    private var ttsSession = 0
+    private var ttsPanelCollapsed = false
+    private var ttsCollapseJob: Job? = null
+    private var ttsPlayingSegment: TtsSegment? = null
+    private var ttsPlaybackFraction = 0f
+    private var ttsLastProgressFraction = 0f
+    private var ttsProgressToken = 0
+    private var ttsTrackProgress = false
+    private var ttsIsSystemEngine = false
+
     /** 位置增量落库任务（翻页后去抖合并） */
     private var persistJob: Job? = null
 
@@ -159,10 +190,14 @@ class ReaderActivity : AppCompatActivity() {
         applyReaderPadding()
         applyLeftHandIndicator()
         einkRefresh.attach(this)
+        applyEinkPageBackground()
         binding.readerView.onTapListener = ::onTap
         binding.readerView.onNoteTapListener = ::onNoteTap
         binding.readerView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> onViewLayout() }
         setupBars()
+        tts.onAutoPaused = {
+            if (ttsRunning && !ttsPaused) pauseTts()
+        }
         loadBook()
     }
 
@@ -187,6 +222,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        pauseTts()
         stopStatusUpdates()
         flushReadingState()
     }
@@ -204,11 +240,22 @@ class ReaderActivity : AppCompatActivity() {
         loadJob?.cancel()
         prefetchJob?.cancel()
         chapterCache.clear()
+        ttsJob?.cancel()
+        ttsCollapseJob?.cancel()
+        tts.onProgress = null
+        tts.release()
         archive?.close()
         archive = null
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // 朗读期间（播放或暂停）：若音量键被配置为翻页键，临时改为调节音量
+        if (ttsRunning && keyCode in VOLUME_KEYS &&
+            (keyCode in prefs.nextPageKeys || keyCode in prefs.prevPageKeys)
+        ) {
+            adjustVolumeByKey(keyCode)
+            return true
+        }
         return when {
             keyCode in prefs.nextPageKeys -> {
                 nextPage(); true
@@ -217,6 +264,23 @@ class ReaderActivity : AppCompatActivity() {
                 prevPage(); true
             }
             else -> super.onKeyDown(keyCode, event)
+        }
+    }
+
+    /** 朗读期间用音量键直接调节媒体音量，停止朗读后恢复原翻页快捷键 */
+    private fun adjustVolumeByKey(keyCode: Int) {
+        val direction = when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> AudioManager.ADJUST_RAISE
+            KeyEvent.KEYCODE_VOLUME_DOWN -> AudioManager.ADJUST_LOWER
+            else -> return
+        }
+        try {
+            audioManager.adjustStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                direction,
+                AudioManager.FLAG_SHOW_UI
+            )
+        } catch (_: Exception) {
         }
     }
 
@@ -229,6 +293,22 @@ class ReaderActivity : AppCompatActivity() {
         binding.btnBrightness.setOnClickListener { showBrightnessDialog() }
         binding.btnTypography.setOnClickListener { showTypographyDialog() }
         binding.btnRefresh.setOnClickListener { manualRefresh() }
+        binding.btnTts.setOnClickListener { toggleTts() }
+        binding.ttsPanel.btnTtsPlayPause.setOnClickListener { toggleTts() }
+        binding.ttsPanel.btnTtsStop.setOnClickListener { stopTts() }
+        binding.ttsPanel.btnTtsRewind.setOnClickListener { skipTts(-1) }
+        binding.ttsPanel.btnTtsForward.setOnClickListener { skipTts(1) }
+        binding.ttsPanel.btnTtsSpeed.setOnClickListener { cycleTtsSpeed() }
+        binding.btnTtsCollapsed.setOnClickListener { expandTtsPanel() }
+        ttsSpeed = prefs.ttsSpeed
+        updateTtsPanel()
+    }
+
+    /** 墨水屏设备使用纯白正文底色，减少灰底对对比度与残影的影响 */
+    private fun applyEinkPageBackground() {
+        if (!einkRefresh.available) return
+        binding.readerView.pageColor = Color.WHITE
+        binding.root.setBackgroundColor(Color.WHITE)
     }
 
     /** 立即全屏清刷一次并重置自动全刷节奏 */
@@ -241,7 +321,8 @@ class ReaderActivity : AppCompatActivity() {
 
     /** 左手模式开启时在阅读区左下角显示提示图标 */
     private fun applyLeftHandIndicator() {
-        binding.imgLeftHand.visibility = if (prefs.leftHandMode) View.VISIBLE else View.GONE
+        binding.imgLeftHand.visibility =
+            if (prefs.leftHandMode && !ttsRunning) View.VISIBLE else View.GONE
     }
 
     private fun applyReaderPadding() {
@@ -627,6 +708,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun nextPage() {
         if (isSettling()) return
+        if (ttsRunning && !ttsPaused) pauseTts()
         val l = layout ?: return
         if (page < l.pageCount - 1) {
             page++
@@ -640,6 +722,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun prevPage() {
         if (isSettling()) return
+        if (ttsRunning && !ttsPaused) pauseTts()
         if (page > 0) {
             page--
             render(true)
@@ -664,6 +747,402 @@ class ReaderActivity : AppCompatActivity() {
         val vis = if (barsVisible) View.VISIBLE else View.GONE
         binding.topBar.visibility = vis
         binding.bottomBar.visibility = vis
+        val target = if (barsVisible) dp(74) else dp(16)
+        listOf(binding.ttsPanel.root, binding.btnTtsCollapsed).forEach { view ->
+            val lp = view.layoutParams as? android.widget.FrameLayout.LayoutParams
+            if (lp != null && lp.bottomMargin != target) {
+                lp.bottomMargin = target
+                view.layoutParams = lp
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------- tts
+
+    private fun toggleTts() {
+        if (ttsRunning) {
+            ttsPanelCollapsed = false
+            updateTtsPanel()
+        }
+        when {
+            !ttsRunning -> startTts()
+            ttsPaused -> resumeTts()
+            else -> pauseTts()
+        }
+    }
+
+    private fun startTts() {
+        if (ttsRunning) return
+        val l = layout
+        if (!bookReady || l == null) {
+            toast(getString(R.string.tts_not_ready))
+            return
+        }
+        hideBars()
+        ttsRunning = true
+        ttsPaused = false
+        ttsLoading = true
+        ttsPanelCollapsed = false
+        ttsSpeed = prefs.ttsSpeed
+        ttsChapter = -1
+        ttsSegments = emptyList()
+        ttsSegmentIndex = 0
+        ttsPlayingSegment = null
+        ttsPlaybackFraction = 0f
+        ttsLastProgressFraction = 0f
+        ttsProgressToken++
+        ttsTrackProgress = false
+        tts.onProgress = null
+        binding.readerView.clearHighlight()
+        updateTtsPanel()
+
+        val offset = currentOffset()
+        val session = ++ttsSession
+        ttsJob?.cancel()
+        ttsJob = lifecycleScope.launch {
+            try {
+                val prepared = tts.prepare(prefs.ttsEngineId)
+                if (session != ttsSession || !ttsRunning) return@launch
+                ttsIsSystemEngine = prepared.isSystem
+                prepared.fallbackMessage?.let { toast(it) }
+                initTtsSegments(chapterIndex, offset, fromEnd = false)
+                ttsLoading = false
+                updateTtsPanel()
+                scheduleTtsPanelCollapse()
+                runTtsLoop(session)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (session != ttsSession) return@launch
+                ttsLoading = false
+                ttsRunning = false
+                ttsPaused = false
+                binding.readerView.clearHighlight()
+                updateTtsPanel()
+                toast(e.message ?: getString(R.string.tts_start_failed))
+            }
+        }
+    }
+
+    private suspend fun runTtsLoop(session: Int) {
+        while (ttsRunning && session == ttsSession) {
+            if (ttsPaused) {
+                while (ttsPaused && ttsRunning && session == ttsSession) delay(60)
+                continue
+            }
+            val segment = ttsSegments.getOrNull(ttsSegmentIndex)
+            if (segment == null) {
+                if (!advanceTtsChapter(session)) {
+                    if (session == ttsSession) endTtsSession()
+                    return
+                }
+                continue
+            }
+            ttsPlayingSegment = segment
+            ttsPlaybackFraction = 0f
+            ttsLastProgressFraction = 0f
+            ttsTrackProgress = segmentCrossesPage(segment)
+            ensureTtsVisible(segment)
+            binding.readerView.setHighlight(segment.start, segment.end)
+            val token = ++ttsProgressToken
+            tts.onProgress = { fraction ->
+                onTtsPlaybackProgress(segment, session, token, fraction)
+            }
+            tts.speak(segment.text, ttsSpeed)
+            if (!ttsRunning || session != ttsSession) {
+                tts.onProgress = null
+                return
+            }
+            if (!ttsPaused) onTtsPlaybackProgress(segment, session, token, 1f)
+            tts.onProgress = null
+            ttsPlayingSegment = null
+            ttsTrackProgress = false
+            if (ttsPaused) {
+                while (ttsPaused && ttsRunning && session == ttsSession) delay(60)
+                continue
+            }
+            ttsSegmentIndex++
+        }
+    }
+
+    /** 当前句子是否跨页；只有跨页句子才需要根据播放进度提前翻页 */
+    private fun segmentCrossesPage(segment: TtsSegment): Boolean {
+        val l = layout ?: return false
+        if (ttsChapter != chapterIndex) return false
+        val startPage = l.pageForOffset(segment.start)
+        val endPage = l.pageForOffset((segment.end - 1).coerceAtLeast(segment.start))
+        return startPage != endPage
+    }
+
+    /**
+     * 播放进度回调（主线程）。
+     *
+     * [segment] 与 [session] 用于拒绝上一句/上一次播放遗留的异步进度，
+     * 并且同一句内只允许进度单调递增、页面向前切换，避免“先到后页再回前页”。
+     */
+    private fun onTtsPlaybackProgress(
+        segment: TtsSegment,
+        session: Int,
+        token: Int,
+        fraction: Float
+    ) {
+        if (!ttsRunning || ttsPaused || !ttsTrackProgress) return
+        if (token != ttsProgressToken) return
+        if (session != ttsSession || ttsPlayingSegment !== segment) return
+        if (ttsChapter != chapterIndex) return
+        val l = layout ?: return
+        val progress = fraction.coerceIn(0f, 1f)
+        if (progress + 0.0001f < ttsLastProgressFraction) return
+        ttsLastProgressFraction = progress
+        ttsPlaybackFraction = progress
+        val offset = TtsProgress.estimateOffset(segment.start, segment.end, progress)
+        val target = l.pageForOffset(offset)
+        if (target > page) {
+            page = target
+            render(pageTurn = false)
+        }
+    }
+
+    private suspend fun advanceTtsChapter(session: Int): Boolean {
+        val next = ttsChapter + 1
+        if (next !in chapters.indices) return false
+        if (!renderChapterForTts(next, 0) || session != ttsSession) return false
+        initTtsSegments(next, 0, fromEnd = false)
+        return true
+    }
+
+    private suspend fun renderChapterForTts(index: Int, offset: Int): Boolean {
+        if (index !in chapters.indices) return false
+        return suspendCancellableCoroutine { cont ->
+            showChapter(index, offset, pageTurn = false) {
+                if (cont.isActive) cont.resume(chapterIndex == index && layout != null)
+            }
+        }
+    }
+
+    private fun initTtsSegments(chapter: Int, offset: Int, fromEnd: Boolean) {
+        val l = layout
+        ttsChapter = chapter
+        if (l == null) {
+            ttsSegments = emptyList()
+            ttsSegmentIndex = 0
+            return
+        }
+        val texts = l.blocks.filterIsInstance<TextBlock>().map { it.text }
+        val segments = TtsSegmenter.segment(texts)
+        if (fromEnd) {
+            ttsSegments = segments
+            ttsSegmentIndex = segments.lastIndex.coerceAtLeast(0)
+            return
+        }
+        val index = segments.indexOfFirst { it.end > offset }
+        if (index < 0) {
+            ttsSegments = segments
+            ttsSegmentIndex = segments.size
+            return
+        }
+        val segment = segments[index]
+        if (offset > segment.start && offset < segment.end) {
+            var local = offset - segment.start
+            while (local < segment.text.length && segment.text[local].isWhitespace()) local++
+            val newStart = segment.start + local
+            val newText = segment.text.substring(local)
+            if (newText.isNotEmpty()) {
+                ttsSegments = segments.toMutableList().also {
+                    it[index] = TtsSegment(newStart, segment.end, newText)
+                }
+                ttsSegmentIndex = index
+                return
+            }
+        }
+        ttsSegments = segments
+        ttsSegmentIndex = index
+    }
+
+    private fun ensureTtsVisible(segment: TtsSegment) {
+        val l = layout ?: return
+        if (ttsChapter != chapterIndex) return
+        val target = l.pageForOffset(segment.start)
+        if (target != page) {
+            page = target
+            render(pageTurn = false)
+        }
+    }
+
+    private fun skipTts(delta: Int) {
+        if (!ttsRunning || ttsLoading) return
+        ttsPaused = false
+        ttsPlayingSegment = null
+        ttsTrackProgress = false
+        ttsPlaybackFraction = 0f
+        ttsLastProgressFraction = 0f
+        ttsProgressToken++
+        tts.onProgress = null
+        tts.stop()
+        val session = ++ttsSession
+        ttsJob?.cancel()
+        ttsJob = lifecycleScope.launch {
+            try {
+                delay(60)
+                if (session != ttsSession || !ttsRunning) return@launch
+                val target = ttsSegmentIndex + delta
+                when {
+                    target < 0 -> {
+                        val prev = ttsChapter - 1
+                        if (prev >= 0 &&
+                            renderChapterForTts(prev, chapters[prev].charCount)
+                        ) {
+                            initTtsSegments(prev, 0, fromEnd = true)
+                        } else {
+                            ttsSegmentIndex = 0
+                        }
+                    }
+                    target >= ttsSegments.size -> {
+                        val next = ttsChapter + 1
+                        if (next in chapters.indices && renderChapterForTts(next, 0)) {
+                            initTtsSegments(next, 0, fromEnd = false)
+                        } else {
+                            endTtsSession()
+                            return@launch
+                        }
+                    }
+                    else -> ttsSegmentIndex = target
+                }
+                updateTtsPanel()
+                scheduleTtsPanelCollapse()
+                runTtsLoop(session)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (session != ttsSession) return@launch
+                endTtsSession()
+                toast(e.message ?: getString(R.string.tts_start_failed))
+            }
+        }
+    }
+
+    private fun cycleTtsSpeed() {
+        val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        val index = speeds.indexOfFirst { kotlin.math.abs(it - ttsSpeed) < 0.01f }
+        ttsSpeed = speeds[(index + 1).mod(speeds.size)]
+        prefs.ttsSpeed = ttsSpeed
+        updateTtsPanel()
+        if (ttsRunning && !ttsLoading) skipTts(0)
+    }
+
+    private fun pauseTts() {
+        if (!ttsRunning || ttsPaused) return
+        ttsCollapseJob?.cancel()
+        ttsPaused = true
+        tts.pause()
+        updateTtsPanel()
+    }
+
+    private fun resumeTts() {
+        if (!ttsRunning || !ttsPaused) return
+        ttsPaused = false
+        tts.resume()
+        ttsSegments.getOrNull(ttsSegmentIndex)?.let { segment ->
+            if (ttsIsSystemEngine) {
+                ttsPlaybackFraction = 0f
+                ttsProgressToken++
+            }
+            val l = layout
+            if (l != null && ttsChapter == chapterIndex) {
+                val offset = TtsProgress.estimateOffset(
+                    segment.start,
+                    segment.end,
+                    ttsPlaybackFraction
+                )
+                val target = l.pageForOffset(offset)
+                if (target != page) {
+                    page = target
+                    render(pageTurn = false)
+                }
+                binding.readerView.setHighlight(segment.start, segment.end)
+            }
+            ttsPlayingSegment = segment
+            ttsLastProgressFraction = ttsPlaybackFraction
+            ttsTrackProgress = segmentCrossesPage(segment)
+        }
+        updateTtsPanel()
+        scheduleTtsPanelCollapse()
+    }
+
+    private fun stopTts() {
+        ttsJob?.cancel()
+        ttsJob = null
+        endTtsSession()
+    }
+
+    private fun endTtsSession() {
+        ttsSession++
+        ttsCollapseJob?.cancel()
+        ttsRunning = false
+        ttsPaused = false
+        ttsLoading = false
+        ttsPanelCollapsed = false
+        ttsPlayingSegment = null
+        ttsTrackProgress = false
+        ttsPlaybackFraction = 0f
+        ttsLastProgressFraction = 0f
+        ttsProgressToken++
+        tts.onProgress = null
+        tts.stop()
+        binding.readerView.clearHighlight()
+        updateTtsPanel()
+    }
+
+    /** 展开悬浮控制面板，并重新开始 5 秒自动收起计时 */
+    private fun expandTtsPanel() {
+        if (!ttsRunning) return
+        ttsPanelCollapsed = false
+        updateTtsPanel()
+        scheduleTtsPanelCollapse()
+    }
+
+    /** 播放中 5 秒无操作后，将控制面板收起到屏幕左侧 */
+    private fun scheduleTtsPanelCollapse() {
+        ttsCollapseJob?.cancel()
+        if (!ttsRunning || ttsPaused || ttsLoading || ttsPanelCollapsed) return
+        ttsCollapseJob = lifecycleScope.launch {
+            delay(TTS_PANEL_AUTO_COLLAPSE_MS)
+            collapseTtsPanel()
+        }
+    }
+
+    private fun collapseTtsPanel() {
+        if (!ttsRunning || ttsPaused || ttsLoading) return
+        ttsPanelCollapsed = true
+        updateTtsPanel()
+    }
+
+    private fun updateTtsPanel() {
+        val panel = binding.ttsPanel
+        val expanded = ttsRunning && !ttsPanelCollapsed
+        panel.root.visibility = if (expanded) View.VISIBLE else View.GONE
+        binding.btnTtsCollapsed.visibility =
+            if (ttsRunning && ttsPanelCollapsed) View.VISIBLE else View.GONE
+        binding.imgLeftHand.visibility =
+            if (!ttsRunning && prefs.leftHandMode) View.VISIBLE else View.GONE
+        if (!expanded) return
+        panel.btnTtsPlayPause.setImageResource(
+            if (ttsPaused) R.drawable.ic_play else R.drawable.ic_pause
+        )
+        panel.btnTtsPlayPause.contentDescription = getString(
+            if (ttsPaused) R.string.tts_resume else R.string.tts_pause
+        )
+        panel.btnTtsSpeed.text =
+            if (ttsLoading) getString(R.string.tts_loading_short) else "${ttsSpeed}x"
+        val enabled = !ttsLoading
+        panel.btnTtsPlayPause.isEnabled = enabled
+        panel.btnTtsRewind.isEnabled = enabled
+        panel.btnTtsForward.isEnabled = enabled
+        panel.btnTtsSpeed.isEnabled = enabled
+    }
+
+    private fun toast(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     // ------------------------------------------------------------------ save
@@ -802,6 +1281,7 @@ class ReaderActivity : AppCompatActivity() {
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.menu_toc)
             .setAdapter(adapter) { _, which ->
+                stopTts()
                 val item = tocItems[which]
                 val target = item.spineIndex.coerceIn(0, chapters.size - 1)
                 showChapter(target, 0, pageTurn = false, anchor = item.anchor)
@@ -826,6 +1306,7 @@ class ReaderActivity : AppCompatActivity() {
 
     /** 点击脚注/尾注上标：解析注释内容并弹窗展示 */
     private fun onNoteTap(noteId: String, targetHref: String) {
+        pauseTts()
         val resolver = noteResolver
         if (resolver == null) {
             showNoteDialog(getString(R.string.note_not_found))
@@ -884,6 +1365,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun showTypographyDialog() {
+        pauseTts()
         val bindingTypo = DialogTypoBinding.inflate(layoutInflater)
         val snapshot = TypographySnapshot.capture(prefs)
 
@@ -1049,6 +1531,9 @@ class ReaderActivity : AppCompatActivity() {
         private const val EXTRA_BOOK_ID = "book_id"
         private const val TYPO_PREVIEW_DEBOUNCE_MS = 80L
 
+        /** 播放中控制面板自动收到屏幕左侧的时间 */
+        private const val TTS_PANEL_AUTO_COLLAPSE_MS = 5000L
+
         /** 墨水屏快刷（无全刷）时翻页后的输入锁定时间 */
         private const val FAST_SETTLE_MS = 220L
 
@@ -1056,6 +1541,11 @@ class ReaderActivity : AppCompatActivity() {
         private const val FULL_SETTLE_MS = 700L
 
         private const val MAX_CACHED_CHAPTERS = 3
+
+        private val VOLUME_KEYS = setOf(
+            KeyEvent.KEYCODE_VOLUME_UP,
+            KeyEvent.KEYCODE_VOLUME_DOWN
+        )
 
         /** 翻页后增量保存位置的去抖间隔 */
         private const val POSITION_PERSIST_DEBOUNCE_MS = 150L
