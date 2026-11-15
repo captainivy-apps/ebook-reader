@@ -12,11 +12,13 @@ class BookStorage(context: Context) {
     val booksDir: File = File(base, "books")
     val coversDir: File = File(base, "covers")
     val fontsDir: File = File(base, "fonts")
+    val ttsDir: File = File(base, "tts")
 
     init {
         booksDir.mkdirs()
         coversDir.mkdirs()
         fontsDir.mkdirs()
+        ttsDir.mkdirs()
     }
 
     fun newBookFile(extension: String = "epub"): File =

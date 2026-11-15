@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -41,6 +42,7 @@ class ReaderView @JvmOverloads constructor(
     var quoteBarColor: Int = Color.parseColor("#C7BFA8")
     var codeColor: Int = Color.parseColor("#EEEAE0")
     var ruleColor: Int = Color.parseColor("#CFC8B8")
+    var highlightColor: Int = Color.parseColor("#F1E2AE")
 
     private var chapterLayout: ChapterLayout? = null
     private var pageIndex: Int = 0
@@ -54,6 +56,12 @@ class ReaderView @JvmOverloads constructor(
 
     private var headerBand: Int = 0
     private var footerBand: Int = 0
+
+    /** 当前朗读高亮范围（章节内字符偏移，-1 表示无高亮） */
+    private var highlightStart: Int = -1
+    private var highlightEnd: Int = -1
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val highlightPath = Path()
 
     private val bgPaint = Paint().apply { style = Paint.Style.FILL }
     private val rulePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 1f }
@@ -95,6 +103,21 @@ class ReaderView @JvmOverloads constructor(
         pageIndex = page.coerceAtLeast(0)
         chapterTitle = title
         progressText = progress
+        invalidate()
+    }
+
+    /** 设置当前朗读高亮范围；范围与 ChapterLayout 的字符基准一致 */
+    fun setHighlight(start: Int, end: Int) {
+        if (highlightStart == start && highlightEnd == end) return
+        highlightStart = start
+        highlightEnd = end
+        invalidate()
+    }
+
+    fun clearHighlight() {
+        if (highlightStart < 0 && highlightEnd < 0) return
+        highlightStart = -1
+        highlightEnd = -1
         invalidate()
     }
 
@@ -155,6 +178,7 @@ class ReaderView @JvmOverloads constructor(
                         item.xOffset.toFloat(),
                         (item.top - sl.getLineTop(item.startLine)).toFloat()
                     )
+                    drawHighlight(canvas, layout, item, block, sl)
                     sl.draw(canvas)
                     canvas.restore()
                 }
@@ -173,6 +197,32 @@ class ReaderView @JvmOverloads constructor(
         canvas.restore()
 
         drawLabels(canvas)
+    }
+
+    /** 在文字下方绘制当前朗读句子的高亮底色 */
+    private fun drawHighlight(
+        canvas: Canvas,
+        layout: ChapterLayout,
+        item: PlacedItem,
+        block: TextBlock,
+        sl: android.text.StaticLayout
+    ) {
+        val start = highlightStart
+        val end = highlightEnd
+        if (start < 0 || end <= start) return
+        val blockStart = layout.blockOffset(item.blockIndex)
+        val length = block.text.length
+        val localStart = (start - blockStart).coerceIn(0, length)
+        val localEnd = (end - blockStart).coerceIn(0, length)
+        if (localEnd <= localStart) return
+        highlightPath.reset()
+        try {
+            sl.getSelectionPath(localStart, localEnd, highlightPath)
+        } catch (_: Exception) {
+            return
+        }
+        highlightPaint.color = highlightColor
+        canvas.drawPath(highlightPath, highlightPaint)
     }
 
     private fun drawBlockBackground(

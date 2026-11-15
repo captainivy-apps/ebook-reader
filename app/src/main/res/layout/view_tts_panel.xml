@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/ttsPanel"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_tts_panel"
+    android:elevation="4dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="4dp"
+    android:paddingEnd="8dp"
+    android:visibility="gone">
+
+    <ImageButton
+        android:id="@+id/btnTtsRewind"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/tts_rewind"
+        android:src="@drawable/ic_rewind"
+        app:tint="#333333" />
+
+    <ImageButton
+        android:id="@+id/btnTtsPlayPause"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/tts_pause"
+        android:src="@drawable/ic_pause"
+        app:tint="#333333" />
+
+    <ImageButton
+        android:id="@+id/btnTtsStop"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/tts_stop"
+        android:src="@drawable/ic_stop"
+        app:tint="#333333" />
+
+    <ImageButton
+        android:id="@+id/btnTtsForward"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/tts_forward"
+        android:src="@drawable/ic_forward"
+        app:tint="#333333" />
+
+    <TextView
+        android:id="@+id/btnTtsSpeed"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:gravity="center"
+        android:minWidth="56dp"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:text="@string/tts_speed_default"
+        android:textColor="#333333"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+</LinearLayout>

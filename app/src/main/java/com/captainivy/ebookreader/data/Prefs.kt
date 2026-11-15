@@ -82,6 +82,21 @@ class Prefs(context: Context) {
         get() = sp.getInt(KEY_HTTP_PORT, 8080)
         set(v) = sp.edit().putInt(KEY_HTTP_PORT, v).apply()
 
+    /** 默认朗读引擎：system 或 TTS 模型 id */
+    var ttsEngineId: String
+        get() = sp.getString(KEY_TTS_ENGINE, TTS_ENGINE_SYSTEM) ?: TTS_ENGINE_SYSTEM
+        set(v) = sp.edit().putString(KEY_TTS_ENGINE, v).apply()
+
+    /** 朗读语速 */
+    var ttsSpeed: Float
+        get() = sp.getFloat(KEY_TTS_SPEED, 1.0f)
+        set(v) = sp.edit().putFloat(KEY_TTS_SPEED, v).apply()
+
+    /** 最近一次选择的模型下载源：original / mirror */
+    var ttsDownloadSource: String
+        get() = sp.getString(KEY_TTS_SOURCE, TTS_SOURCE_MIRROR) ?: TTS_SOURCE_MIRROR
+        set(v) = sp.edit().putString(KEY_TTS_SOURCE, v).apply()
+
     /** 向前翻页（阅读进度前进）按键列表，用户可自定义多个 */
     var nextPageKeys: List<Int>
         get() = decodeKeys(sp.getString(KEY_NEXT_PAGE_KEYS, null), DEFAULT_NEXT_PAGE_KEYS)
@@ -100,6 +115,9 @@ class Prefs(context: Context) {
         const val FONT_SANS = "sans"
         const val FONT_MONO = "mono"
         const val REFRESH_INTERVAL_DEFAULT = 5
+        const val TTS_ENGINE_SYSTEM = "system"
+        const val TTS_SOURCE_ORIGINAL = "original"
+        const val TTS_SOURCE_MIRROR = "mirror"
 
         val DEFAULT_NEXT_PAGE_KEYS = listOf(
             KeyEvent.KEYCODE_DPAD_RIGHT,
@@ -145,5 +163,8 @@ class Prefs(context: Context) {
         private const val KEY_LIBRARY_GRID = "library_grid"
         private const val KEY_NEXT_PAGE_KEYS = "next_page_keys"
         private const val KEY_PREV_PAGE_KEYS = "prev_page_keys"
+        private const val KEY_TTS_ENGINE = "tts_engine"
+        private const val KEY_TTS_SPEED = "tts_speed"
+        private const val KEY_TTS_SOURCE = "tts_source"
     }
 }
