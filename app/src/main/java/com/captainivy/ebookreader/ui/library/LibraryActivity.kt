@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -38,6 +39,9 @@ class LibraryActivity : AppCompatActivity() {
     private var offset = 0
     private var loading = false
     private var hasMore = true
+
+    /** 上次打开阅读器的时间，用于抑制双击/卡顿造成的重复启动 */
+    private var lastOpenAt = 0L
 
     private val pickDocument =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -74,6 +78,7 @@ class LibraryActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        lastOpenAt = 0L
         reload()
     }
 
@@ -171,6 +176,11 @@ class LibraryActivity : AppCompatActivity() {
     // -------------------------------------------------------------- actions
 
     private fun openReader(book: Book) {
+        // 墨水屏设备响应慢，快速双击会启动两个阅读器实例；较新的实例会被较旧实例
+        // 稍后写回的内存进度覆盖，表现为偶发"进度回到很早以前"。这里做去抖。
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastOpenAt < OPEN_DEBOUNCE_MS) return
+        lastOpenAt = now
         startActivity(ReaderActivity.newIntent(this, book.id))
     }
 
@@ -266,6 +276,7 @@ class LibraryActivity : AppCompatActivity() {
 
     companion object {
         private const val PAGE_SIZE = 30
+        private const val OPEN_DEBOUNCE_MS = 700L
         private const val TARGET_COLUMN_DP = 110f
         private const val MIN_GRID_COLUMNS = 2
         private const val MAX_GRID_COLUMNS = 6

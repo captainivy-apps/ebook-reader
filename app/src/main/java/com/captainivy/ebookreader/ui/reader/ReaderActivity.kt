@@ -51,9 +51,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 class ReaderActivity : AppCompatActivity() {
 
@@ -116,11 +118,19 @@ class ReaderActivity : AppCompatActivity() {
     private var positionSeq = 0L
     private var writtenSeq = 0L
 
+    /** 正在从数据库对齐位置期间，暂时禁止本实例写库，避免用旧位置覆盖 */
+    private var syncInProgress = false
+
+    /** 本实例最后一次写入/加载的位置时间戳（对应 books.last_read_at），用于判断库中是否有更新的写入 */
+    @Volatile
+    private var lastWrittenAt = 0L
+
     private data class PositionSnapshot(
         val chapter: Int,
         val offset: Int,
         val maxReadOffset: Int,
-        val finished: Boolean
+        val finished: Boolean,
+        val capturedAt: Long
     )
 
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -158,13 +168,21 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        claimActiveReader()
         applyLeftHandIndicator()
         startSessionIfReady()
         startStatusUpdates()
+        syncPositionFromStore()
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    /** 用户按 Home/最近任务离开时尽早落库（比 onPause 更可靠的时机） */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        flushReadingState()
     }
 
     override fun onPause() {
@@ -181,6 +199,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        releaseActiveReader()
         persistJob?.cancel()
         loadJob?.cancel()
         prefetchJob?.cancel()
@@ -267,6 +286,7 @@ class ReaderActivity : AppCompatActivity() {
             pendingOffset = (b.currentOffset - chapterStart).coerceAtLeast(0)
             bookReady = true
             progress = ReadingProgress(b.maxReadOffset)
+            lastWrittenAt = b.lastReadAt ?: 0L
             startSessionIfReady()
             maybeStartReading()
             applyStoredBrightness()
@@ -325,30 +345,39 @@ class ReaderActivity : AppCompatActivity() {
         offset: Int,
         pageTurn: Boolean,
         startAtLastPage: Boolean = false,
-        anchor: String? = null
+        anchor: String? = null,
+        onRendered: (() -> Unit)? = null
     ) {
-        if (index < 0 || index >= chapters.size) return
+        if (index < 0 || index >= chapters.size) {
+            onRendered?.invoke()
+            return
+        }
         val (w, h) = contentSize()
         if (w <= 0 || h <= 0) {
             pendingChapter = index
             pendingOffset = offset
+            onRendered?.invoke()
             return
         }
         loadJob?.cancel()
         loadJob = lifecycleScope.launch {
-            val cached = loadChapter(index, w, h) ?: return@launch
-            if (!isActive) return@launch
-            val newLayout = cached.layout
-            val anchorOffset = anchor?.let { cached.anchors[it] }
-            chapterIndex = index
-            layout = newLayout
-            page = when {
-                startAtLastPage -> newLayout.pageCount - 1
-                anchorOffset != null -> newLayout.pageForOffset(anchorOffset)
-                else -> newLayout.pageForOffset(offset)
+            try {
+                val cached = loadChapter(index, w, h) ?: return@launch
+                if (!isActive) return@launch
+                val newLayout = cached.layout
+                val anchorOffset = anchor?.let { cached.anchors[it] }
+                chapterIndex = index
+                layout = newLayout
+                page = when {
+                    startAtLastPage -> newLayout.pageCount - 1
+                    anchorOffset != null -> newLayout.pageForOffset(anchorOffset)
+                    else -> newLayout.pageForOffset(offset)
+                }
+                render(pageTurn)
+                prefetchChapter(index + 1, w, h)
+            } finally {
+                onRendered?.invoke()
             }
-            render(pageTurn)
-            prefetchChapter(index + 1, w, h)
         }
     }
 
@@ -482,6 +511,49 @@ class ReaderActivity : AppCompatActivity() {
     private fun updateSessionOffset(off: Int, countNew: Boolean) {
         val overall = (chapters.getOrNull(chapterIndex)?.charStart ?: 0) + off
         progress?.onPosition(overall, countNew)
+    }
+
+    // ------------------------------------------ active instance & resync
+
+    /**
+     * 同一本书若因双击/卡顿产生了多个阅读器实例，只允许当前前台实例写库，
+     * 避免旧实例在稍后（onStop/再次返回）用内存里的旧位置覆盖新进度。
+     */
+    private fun claimActiveReader() {
+        activeReaders[bookId] = WeakReference(this)
+    }
+
+    private fun releaseActiveReader() {
+        if (activeReaders[bookId]?.get() === this) activeReaders.remove(bookId)
+    }
+
+    private fun isActiveReader(): Boolean {
+        val current = activeReaders[bookId]?.get()
+        return current == null || current === this
+    }
+
+    /**
+     * 恢复前台时以数据库为准对齐位置：若其它实例（或更晚的写入）已推进进度，
+     * 本实例跳到库中的最新位置，避免“回到很久以前”并防止后续再写回旧值。
+     */
+    private fun syncPositionFromStore() {
+        if (!bookReady || layout == null || syncInProgress) return
+        if (loadJob?.isActive == true) return
+        lifecycleScope.launch {
+            val fresh = withContext(Dispatchers.IO) { repo.get(bookId) } ?: return@launch
+            if (!bookReady || layout == null || chapters.isEmpty()) return@launch
+            // 只有数据库中确实存在晚于本实例最后一次写入的记录时才对齐
+            if (!ReaderResync.shouldAdopt(fresh.lastReadAt, lastWrittenAt)) return@launch
+            lastWrittenAt = fresh.lastReadAt ?: 0L
+            val ch = fresh.currentChapter.coerceIn(0, chapters.size - 1)
+            val chapterStart = chapters.getOrNull(ch)?.charStart ?: 0
+            val targetOffset = (fresh.currentOffset - chapterStart).coerceAtLeast(0)
+            if (ReaderResync.isSamePosition(chapterIndex, currentOffset(), ch, targetOffset)) {
+                return@launch
+            }
+            syncInProgress = true
+            showChapter(ch, targetOffset, pageTurn = false) { syncInProgress = false }
+        }
     }
 
     // ------------------------------------------------------------ status bar
@@ -650,7 +722,8 @@ class ReaderActivity : AppCompatActivity() {
             chapter = chapterIndex,
             offset = overall,
             maxReadOffset = if (max > overall) max else overall,
-            finished = atEnd
+            finished = atEnd,
+            capturedAt = System.currentTimeMillis()
         )
     }
 
@@ -659,6 +732,8 @@ class ReaderActivity : AppCompatActivity() {
      * [sync] 为 true 时在当前线程同步写入（用于 pause/stop 等必须立即持久的时机）。
      */
     private fun persistPosition(readMs: Long, chars: Int, sync: Boolean) {
+        // 非当前前台实例、或正在从数据库对齐位置时，不写库，避免用旧位置覆盖新进度
+        if (!isActiveReader() || syncInProgress) return
         val snapshot = currentPositionSnapshot() ?: return
         val seq = synchronized(positionLock) { ++positionSeq }
         val write = Runnable {
@@ -671,9 +746,11 @@ class ReaderActivity : AppCompatActivity() {
                         offset = snapshot.offset,
                         maxReadOffset = snapshot.maxReadOffset,
                         finished = snapshot.finished,
+                        at = snapshot.capturedAt,
                         readMs = readMs,
                         chars = chars
                     )
+                    if (snapshot.capturedAt > lastWrittenAt) lastWrittenAt = snapshot.capturedAt
                 }
             }
         }
@@ -981,7 +1058,10 @@ class ReaderActivity : AppCompatActivity() {
         private const val MAX_CACHED_CHAPTERS = 3
 
         /** 翻页后增量保存位置的去抖间隔 */
-        private const val POSITION_PERSIST_DEBOUNCE_MS = 400L
+        private const val POSITION_PERSIST_DEBOUNCE_MS = 150L
+
+        /** 每本书当前处于前台的阅读器实例；用于阻止重复实例用旧位置写库 */
+        private val activeReaders = ConcurrentHashMap<Long, WeakReference<ReaderActivity>>()
 
         private val HEADING_STYLES = setOf(
             TextStyle.H1, TextStyle.H2, TextStyle.H3,

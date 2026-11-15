@@ -83,17 +83,25 @@ class BookDao(private val helper: AppDatabase) {
             null, null, "${Books.ID} ASC"
         ).use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }
 
-    /** 原子写回重算后的章节字符区间与书籍进度，并标记字符基准已升级 */
+    /**
+     * 原子写回重算后的章节字符区间与书籍进度，并标记字符基准已升级。
+     *
+     * [expectedLastReadAt] 为迁移开始时读到的 `last_read_at`。写回前在同一事务内重新校验；
+     * 若期间该书已被阅读写过新进度，则放弃本次迁移（返回 false，版本不变，下次重试），
+     * 避免用旧快照覆盖更新的阅读位置。
+     */
     fun applyCharLayout(
         bookId: Long,
         chapters: List<Chapter>,
         totalChars: Int,
         currentOffset: Int,
-        maxReadOffset: Int
-    ) {
+        maxReadOffset: Int,
+        expectedLastReadAt: Long?
+    ): Boolean {
         val database = db
         database.beginTransaction()
         try {
+            if (readLastReadAt(database, bookId) != expectedLastReadAt) return false
             chapters.forEach { c ->
                 val values = ContentValues().apply {
                     put(Chapters.CHAR_START, c.charStart)
@@ -111,10 +119,24 @@ class BookDao(private val helper: AppDatabase) {
             }
             database.update(Books.TABLE, bookValues, "${Books.ID}=?", arrayOf(bookId.toString()))
             database.setTransactionSuccessful()
+            return true
         } finally {
             database.endTransaction()
         }
     }
+
+    private fun readLastReadAt(database: SQLiteDatabase, bookId: Long): Long? =
+        database.query(
+            Books.TABLE, arrayOf(Books.LAST_READ_AT), "${Books.ID}=?",
+            arrayOf(bookId.toString()), null, null, null
+        ).use { c ->
+            if (c.moveToFirst()) {
+                val idx = c.getColumnIndexOrThrow(Books.LAST_READ_AT)
+                if (c.isNull(idx)) null else c.getLong(idx)
+            } else {
+                null
+            }
+        }
 
     /** 无需重算（如空书）时直接标记为当前基准，避免每次启动重复尝试 */
     fun markCharLayoutCurrent(bookId: Long) {

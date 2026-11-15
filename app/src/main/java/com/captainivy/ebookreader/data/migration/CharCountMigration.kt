@@ -85,7 +85,8 @@ class CharCountMigration(
                 chapters = updated,
                 totalChars = acc,
                 currentOffset = rebased.current,
-                maxReadOffset = rebased.max
+                maxReadOffset = rebased.max,
+                expectedLastReadAt = book.lastReadAt
             )
         } finally {
             archive.close()

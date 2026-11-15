@@ -45,8 +45,11 @@ class BookRepository(context: Context, db: AppDatabase) {
         chapters: List<Chapter>,
         totalChars: Int,
         currentOffset: Int,
-        maxReadOffset: Int
-    ) = dao.applyCharLayout(bookId, chapters, totalChars, currentOffset, maxReadOffset)
+        maxReadOffset: Int,
+        expectedLastReadAt: Long?
+    ): Boolean = dao.applyCharLayout(
+        bookId, chapters, totalChars, currentOffset, maxReadOffset, expectedLastReadAt
+    )
 
     fun markCharLayoutCurrent(bookId: Long) = dao.markCharLayoutCurrent(bookId)
 
@@ -56,6 +59,7 @@ class BookRepository(context: Context, db: AppDatabase) {
         offset: Int,
         maxReadOffset: Int,
         finished: Boolean,
+        at: Long,
         readMs: Long,
         chars: Int
     ) {
@@ -65,7 +69,7 @@ class BookRepository(context: Context, db: AppDatabase) {
             offset = offset,
             maxReadOffset = maxReadOffset,
             finished = finished,
-            at = System.currentTimeMillis(),
+            at = at,
             day = DateUtils.today(),
             readMs = readMs,
             chars = chars
