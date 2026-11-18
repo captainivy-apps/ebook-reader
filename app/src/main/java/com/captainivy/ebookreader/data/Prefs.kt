@@ -97,6 +97,11 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_TTS_SOURCE, TTS_SOURCE_MIRROR) ?: TTS_SOURCE_MIRROR
         set(v) = sp.edit().putString(KEY_TTS_SOURCE, v).apply()
 
+    /** 朗读时禁用手动翻页（触摸屏幕与按键翻页） */
+    var ttsDisableManualPageTurn: Boolean
+        get() = sp.getBoolean(KEY_TTS_DISABLE_PAGE_TURN, false)
+        set(v) = sp.edit().putBoolean(KEY_TTS_DISABLE_PAGE_TURN, v).apply()
+
     /** 向前翻页（阅读进度前进）按键列表，用户可自定义多个 */
     var nextPageKeys: List<Int>
         get() = decodeKeys(sp.getString(KEY_NEXT_PAGE_KEYS, null), DEFAULT_NEXT_PAGE_KEYS)
@@ -166,5 +171,6 @@ class Prefs(context: Context) {
         private const val KEY_TTS_ENGINE = "tts_engine"
         private const val KEY_TTS_SPEED = "tts_speed"
         private const val KEY_TTS_SOURCE = "tts_source"
+        private const val KEY_TTS_DISABLE_PAGE_TURN = "tts_disable_page_turn"
     }
 }

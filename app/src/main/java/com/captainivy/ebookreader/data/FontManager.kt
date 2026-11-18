@@ -209,6 +209,11 @@ object FontManager {
     fun isDownloaded(fileName: String): Boolean =
         File(App.get().repository.storage().fontsDir, fileName).exists()
 
+    /** 已下载字体在界面上的展示名：内置目录字体使用与下载弹窗一致的名字 */
+    fun displayName(fileName: String): String =
+        catalog.firstOrNull { it.fileName == fileName }?.name
+            ?: fileName.substringBeforeLast('.', fileName)
+
     // -------------------------------------------------------------- download
 
     /**
@@ -341,7 +346,8 @@ object FontManager {
         val target = entry.removePrefix("/")
         GZIPInputStream(archive.inputStream().buffered()).use { input ->
             val header = ByteArray(512)
-            var pendingLongName: String? = null
+            // 用单元素数组保存跨条目状态，避免局部 var 在循环中的无用赋值告警
+            val pendingLongName = arrayOfNulls<String>(1)
             while (true) {
                 if (!readFully(input, header)) return false
                 if (header.all { it == 0.toByte() }) return false
@@ -353,7 +359,7 @@ object FontManager {
                 when (typeFlag) {
                     'L' -> { // GNU 长文件名
                         val bytes = readBytes(input, size)
-                        pendingLongName = String(bytes, Charsets.UTF_8).trimEnd('\u0000')
+                        pendingLongName[0] = String(bytes, Charsets.UTF_8).trimEnd('\u0000')
                         skip(input, padding(size))
                         continue
                     }
@@ -363,8 +369,8 @@ object FontManager {
                     }
                 }
 
-                val effectiveName = pendingLongName ?: name
-                pendingLongName = null
+                val effectiveName = pendingLongName[0] ?: name
+                pendingLongName[0] = null
                 val isFile = typeFlag == '0' || typeFlag == '\u0000'
                 val matches = isFile &&
                     (effectiveName == target ||

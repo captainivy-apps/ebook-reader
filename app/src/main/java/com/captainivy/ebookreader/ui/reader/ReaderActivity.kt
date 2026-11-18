@@ -1,13 +1,19 @@
 package com.captainivy.ebookreader.ui.reader
 
+import android.Manifest
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
@@ -19,6 +25,7 @@ import android.widget.ArrayAdapter
 import android.widget.SeekBar
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -38,6 +45,7 @@ import com.captainivy.ebookreader.data.epub.TextBlock
 import com.captainivy.ebookreader.data.epub.TextStyle
 import com.captainivy.ebookreader.data.migration.CharCountMigration
 import com.captainivy.ebookreader.data.tts.TtsController
+import com.captainivy.ebookreader.data.tts.TtsPlaybackService
 import com.captainivy.ebookreader.data.tts.TtsProgress
 import com.captainivy.ebookreader.data.tts.TtsSegment
 import com.captainivy.ebookreader.data.tts.TtsSegmenter
@@ -141,6 +149,29 @@ class ReaderActivity : AppCompatActivity() {
     private var ttsTrackProgress = false
     private var ttsIsSystemEngine = false
 
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private var playbackService: TtsPlaybackService? = null
+    private var playbackBound = false
+    private var pendingPlaybackState: TtsPlaybackService.PlaybackState? = null
+
+    private val playbackConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val service = (binder as? TtsPlaybackService.LocalBinder)?.service() ?: return
+            playbackService = service
+            service.onCommand = ::handlePlaybackCommand
+            pendingPlaybackState?.let { service.updateState(it) }
+            pendingPlaybackState = null
+            currentPlaybackState()?.let { service.updateState(it) }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            playbackService?.onCommand = null
+            playbackService = null
+        }
+    }
+
     /** 位置增量落库任务（翻页后去抖合并） */
     private var persistJob: Job? = null
 
@@ -222,7 +253,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        pauseTts()
+        // 熄屏、按 Home 或切换应用都不打断朗读：前台服务会保活并提供媒体控制。
         stopStatusUpdates()
         flushReadingState()
     }
@@ -233,9 +264,20 @@ class ReaderActivity : AppCompatActivity() {
         flushReadingState()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val newBookId = intent.getLongExtra(EXTRA_BOOK_ID, 0L)
+        if (newBookId <= 0L || newBookId == bookId) return
+        stopTts()
+        setIntent(intent)
+        finish()
+        startActivity(newIntent(this, newBookId))
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         releaseActiveReader()
+        stopTtsPlaybackService()
         persistJob?.cancel()
         loadJob?.cancel()
         prefetchJob?.cancel()
@@ -707,6 +749,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun nextPage() {
+        if (isManualPageTurnBlocked()) return
         if (isSettling()) return
         if (ttsRunning && !ttsPaused) pauseTts()
         val l = layout ?: return
@@ -721,6 +764,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun prevPage() {
+        if (isManualPageTurnBlocked()) return
         if (isSettling()) return
         if (ttsRunning && !ttsPaused) pauseTts()
         if (page > 0) {
@@ -731,6 +775,10 @@ class ReaderActivity : AppCompatActivity() {
             showChapter(chapterIndex - 1, 0, pageTurn = true, startAtLastPage = true)
         }
     }
+
+    /** 朗读期间按设置禁止手动翻页（触摸与按键均走 nextPage/prevPage） */
+    private fun isManualPageTurnBlocked(): Boolean =
+        ttsRunning && prefs.ttsDisableManualPageTurn
 
     private fun toggleBars() {
         barsVisible = !barsVisible
@@ -795,6 +843,9 @@ class ReaderActivity : AppCompatActivity() {
         tts.onProgress = null
         binding.readerView.clearHighlight()
         updateTtsPanel()
+        requestNotificationPermissionIfNeeded()
+        startTtsPlaybackService()
+        syncPlaybackState()
 
         val offset = currentOffset()
         val session = ++ttsSession
@@ -808,6 +859,7 @@ class ReaderActivity : AppCompatActivity() {
                 initTtsSegments(chapterIndex, offset, fromEnd = false)
                 ttsLoading = false
                 updateTtsPanel()
+                syncPlaybackState()
                 scheduleTtsPanelCollapse()
                 runTtsLoop(session)
             } catch (e: CancellationException) {
@@ -819,6 +871,7 @@ class ReaderActivity : AppCompatActivity() {
                 ttsPaused = false
                 binding.readerView.clearHighlight()
                 updateTtsPanel()
+                stopTtsPlaybackService()
                 toast(e.message ?: getString(R.string.tts_start_failed))
             }
         }
@@ -908,6 +961,7 @@ class ReaderActivity : AppCompatActivity() {
         if (next !in chapters.indices) return false
         if (!renderChapterForTts(next, 0) || session != ttsSession) return false
         initTtsSegments(next, 0, fromEnd = false)
+        syncPlaybackState()
         return true
     }
 
@@ -1009,6 +1063,7 @@ class ReaderActivity : AppCompatActivity() {
                     else -> ttsSegmentIndex = target
                 }
                 updateTtsPanel()
+                syncPlaybackState()
                 scheduleTtsPanelCollapse()
                 runTtsLoop(session)
             } catch (e: CancellationException) {
@@ -1036,6 +1091,7 @@ class ReaderActivity : AppCompatActivity() {
         ttsPaused = true
         tts.pause()
         updateTtsPanel()
+        syncPlaybackState()
     }
 
     private fun resumeTts() {
@@ -1067,6 +1123,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         updateTtsPanel()
         scheduleTtsPanelCollapse()
+        syncPlaybackState()
     }
 
     private fun stopTts() {
@@ -1091,6 +1148,101 @@ class ReaderActivity : AppCompatActivity() {
         tts.stop()
         binding.readerView.clearHighlight()
         updateTtsPanel()
+        stopTtsPlaybackService()
+    }
+
+    // ------------------------------------------------------ playback service
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        try {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun startTtsPlaybackService() {
+        TtsPlaybackService.start(this)
+        if (playbackBound) return
+        try {
+            playbackBound = bindService(
+                Intent(this, TtsPlaybackService::class.java),
+                playbackConnection,
+                Context.BIND_AUTO_CREATE
+            )
+        } catch (_: Exception) {
+            playbackBound = false
+        }
+    }
+
+    private fun stopTtsPlaybackService() {
+        val service = playbackService
+        service?.onCommand = null
+        if (service != null) {
+            service.stopSession()
+        } else if (playbackBound) {
+            TtsPlaybackService.stop(this)
+        }
+        if (playbackBound) {
+            try {
+                unbindService(playbackConnection)
+            } catch (_: Exception) {
+            }
+            playbackBound = false
+        }
+        playbackService = null
+        pendingPlaybackState = null
+    }
+
+    private fun currentPlaybackState(): TtsPlaybackService.PlaybackState? {
+        if (!ttsRunning) return null
+        return TtsPlaybackService.PlaybackState(
+            bookId = bookId,
+            title = book?.title.orEmpty(),
+            subtitle = chapters.getOrNull(ttsChapter)?.title.orEmpty(),
+            playing = ttsRunning && !ttsPaused && !ttsLoading,
+            paused = ttsPaused,
+            loading = ttsLoading
+        )
+    }
+
+    private fun syncPlaybackState() {
+        val state = currentPlaybackState() ?: return
+        val service = playbackService
+        if (service != null) {
+            service.updateState(state)
+        } else {
+            pendingPlaybackState = state
+        }
+    }
+
+    private fun handlePlaybackCommand(command: TtsPlaybackService.Command) {
+        if (isFinishing || isDestroyed) {
+            if (command == TtsPlaybackService.Command.STOP) stopTtsPlaybackService()
+            return
+        }
+        when (command) {
+            TtsPlaybackService.Command.PLAY -> {
+                if (ttsRunning) resumeTts() else stopTtsPlaybackService()
+            }
+            TtsPlaybackService.Command.PAUSE -> {
+                if (ttsRunning && !ttsLoading) pauseTts()
+            }
+            TtsPlaybackService.Command.STOP -> {
+                if (ttsRunning) stopTts() else stopTtsPlaybackService()
+            }
+            TtsPlaybackService.Command.PREVIOUS -> {
+                if (ttsRunning) skipTts(-1)
+            }
+            TtsPlaybackService.Command.NEXT -> {
+                if (ttsRunning) skipTts(1)
+            }
+        }
     }
 
     /** 展开悬浮控制面板，并重新开始 5 秒自动收起计时 */
@@ -1377,7 +1529,7 @@ class ReaderActivity : AppCompatActivity() {
         fontLabels.add(getString(R.string.font_sans)); fontValues.add(Prefs.FONT_SANS)
         fontLabels.add(getString(R.string.font_mono)); fontValues.add(Prefs.FONT_MONO)
         FontManager.downloadedFonts().forEach { f ->
-            fontLabels.add(f.nameWithoutExtension); fontValues.add(f.absolutePath)
+            fontLabels.add(FontManager.displayName(f.name)); fontValues.add(f.absolutePath)
         }
         fontValuesHolder = fontValues
         bindingTypo.spinnerFont.adapter =

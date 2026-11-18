@@ -44,6 +44,9 @@
 - 内置多款中英文离线模型（VITS / Kokoro），可在设置中下载、切换、删除
 - 模型下载支持 GitHub 原始地址与国内加速镜像，失败可切换源重试
 - 朗读时自动跟随内容翻页，支持暂停 / 继续 / 上一句 / 下一句 / 语速调节
+- 熄屏、锁屏或切换到后台后继续朗读（前台服务 + 唤醒锁保活）
+- 通知栏与锁屏媒体控制：播放 / 暂停、上一句、下一句、停止，支持蓝牙耳机按键
+- 可选「朗读时禁用手动翻页」：朗读期间触摸与按键翻页暂时失效
 - 音频焦点丢失时自动暂停
 
 ### 字体
@@ -133,14 +136,16 @@ app/src/main/java/com/captainivy/ebookreader/
 
 ## 权限
 
-- `INTERNET` / `ACCESS_NETWORK_STATE`：字体与 TTS 模型下载
+- `INTERNET` / `ACCESS_NETWORK_STATE`：字体与 TTS 模型下载，以及访问局域网 HTTP 服务（如从局域网 URL 导入字体）
 - `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC` / `WAKE_LOCK`：局域网 HTTP 上传服务
-- `POST_NOTIFICATIONS`：Android 13+ 上传服务前台通知
+- `FOREGROUND_SERVICE_MEDIA_PLAYBACK` / `WAKE_LOCK`：熄屏与后台朗读保活
+- `POST_NOTIFICATIONS`：Android 13+ 上传服务与朗读播放通知
 
 ## 说明
 
 - 第一期仅支持 EPUB 格式
 - 所有功能离线可用（除字体、TTS 模型下载与局域网传书）
+- 允许明文 HTTP（`networkSecurityConfig` 中 `cleartextTrafficPermitted`），用于从局域网 HTTP 服务导入字体；targetSdk 34 下本地网络随 `INTERNET` 隐式授予，无需 `ACCESS_LOCAL_NETWORK`（该权限仅 targetSdk ≥ 37 强制）
 - 应用面向墨水屏低配设备优化，翻页与刷新策略优先保证流畅、低残影
 
 ## License

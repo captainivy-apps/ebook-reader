@@ -101,7 +101,7 @@
     <string name="settings_font_import">导入本地字体</string>
     <string name="settings_font_url">从 URL 导入字体</string>
     <string name="font_url_title">从 URL 导入字体</string>
-    <string name="font_url_hint">输入字体文件直链（.ttf / .otf / .ttc）</string>
+    <string name="font_url_hint">输入字体文件直链（.ttf / .otf / .ttc），支持 http(s) 与局域网地址</string>
     <string name="font_url_invalid">请输入有效的 http(s) 地址</string>
     <string name="font_url_downloading">正在下载字体…</string>
     <string name="font_url_success">字体导入完成</string>
@@ -154,6 +154,8 @@
     <string name="settings_tts_engine">默认朗读引擎</string>
     <string name="settings_tts_models">朗读模型</string>
     <string name="settings_tts_hint">离线模型从 sherpa-onnx 官方 GitHub 发布页下载，支持切换到国内 GitHub 加速镜像。Kokoro 体积较大，低配设备合成可能较慢。</string>
+    <string name="settings_tts_disable_page_turn">朗读时禁用手动翻页</string>
+    <string name="settings_tts_disable_page_turn_hint">在进行朗读时，触摸屏幕和按键翻页暂时失效。</string>
     <string name="tts_engine_system">系统朗读（免下载）</string>
     <string name="tts_engine_dialog_title">选择默认朗读引擎</string>
     <string name="tts_models_title">朗读模型</string>
@@ -179,6 +181,10 @@
     <string name="tts_action_delete">删除模型</string>
     <string name="tts_already_downloading">该模型正在下载</string>
     <string name="tts_engine_changed">已切换默认朗读引擎</string>
+    <string name="tts_notification_channel">朗读播放</string>
+    <string name="tts_notification_playing">正在朗读</string>
+    <string name="tts_notification_paused">已暂停</string>
+    <string name="tts_notification_preparing">正在准备朗读…</string>
 
     <!-- 版本信息 -->
     <string name="settings_version_info">版本 %1$s\n构建时间 %2$s</string>

@@ -86,6 +86,10 @@ class SettingsActivity : AppCompatActivity() {
         binding.switchLeftHand.setOnCheckedChangeListener { _, checked ->
             prefs.leftHandMode = checked
         }
+        binding.switchTtsDisablePageTurn.isChecked = prefs.ttsDisableManualPageTurn
+        binding.switchTtsDisablePageTurn.setOnCheckedChangeListener { _, checked ->
+            prefs.ttsDisableManualPageTurn = checked
+        }
         binding.rowRefreshInterval.setOnClickListener { showRefreshIntervalDialog() }
         binding.rowNextKeys.setOnClickListener { showPageKeysDialog(PageDirection.NEXT) }
         binding.rowPrevKeys.setOnClickListener { showPageKeysDialog(PageDirection.PREV) }
