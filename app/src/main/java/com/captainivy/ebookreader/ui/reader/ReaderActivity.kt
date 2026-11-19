@@ -199,10 +199,12 @@ class ReaderActivity : AppCompatActivity() {
     private var batteryPercent = -1
     private var statusReceiverRegistered = false
     private var clockJob: Job? = null
+    private val batteryFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            batteryPercent = parseBatteryPercent(intent)
+            val percent = parseBatteryPercent(intent)
+            if (percent >= 0) batteryPercent = percent
             updateStatusBar()
         }
     }
@@ -236,6 +238,7 @@ class ReaderActivity : AppCompatActivity() {
         super.onResume()
         claimActiveReader()
         applyLeftHandIndicator()
+        updatePageTurnLockIndicator()
         startSessionIfReady()
         startStatusUpdates()
         syncPositionFromStore()
@@ -681,14 +684,17 @@ class ReaderActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------ status bar
 
-    /** 注册电量监听并按分钟刷新右上角时间（HH:mm） */
+    /**
+     * 注册电量广播即时更新，并每 [STATUS_POLL_INTERVAL_MS] 轮询一次电量作为兜底。
+     * 时间/电量均由 [ReaderView.setStatusBar] 去重，只有数值变化才触发重绘。
+     */
     private fun startStatusUpdates() {
         if (!statusReceiverRegistered) {
             try {
                 ContextCompat.registerReceiver(
                     this,
                     batteryReceiver,
-                    IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                    batteryFilter,
                     ContextCompat.RECEIVER_NOT_EXPORTED
                 )
                 statusReceiverRegistered = true
@@ -698,12 +704,22 @@ class ReaderActivity : AppCompatActivity() {
         clockJob?.cancel()
         clockJob = lifecycleScope.launch {
             while (isActive) {
+                refreshBatteryPercent()
                 updateStatusBar()
-                // 对齐到下一个整分钟，避免无意义的频繁重绘
-                val now = System.currentTimeMillis()
-                delay(60_000L - now % 60_000L + 50L)
+                delay(STATUS_POLL_INTERVAL_MS)
             }
         }
+    }
+
+    /** 主动读取 sticky 电量广播，避免部分机型系统广播间隔过长导致显示滞后 */
+    private fun refreshBatteryPercent() {
+        val sticky = try {
+            registerReceiver(null, batteryFilter)
+        } catch (_: Exception) {
+            null
+        }
+        val percent = parseBatteryPercent(sticky)
+        if (percent >= 0) batteryPercent = percent
     }
 
     private fun stopStatusUpdates() {
@@ -780,6 +796,11 @@ class ReaderActivity : AppCompatActivity() {
     private fun isManualPageTurnBlocked(): Boolean =
         ttsRunning && prefs.ttsDisableManualPageTurn
 
+    /** 翻页锁定状态与阅读进度左侧的小锁图标保持同步 */
+    private fun updatePageTurnLockIndicator() {
+        binding.readerView.setPageTurnLocked(isManualPageTurnBlocked())
+    }
+
     private fun toggleBars() {
         barsVisible = !barsVisible
         applyBarsVisibility()
@@ -843,6 +864,7 @@ class ReaderActivity : AppCompatActivity() {
         tts.onProgress = null
         binding.readerView.clearHighlight()
         updateTtsPanel()
+        updatePageTurnLockIndicator()
         requestNotificationPermissionIfNeeded()
         startTtsPlaybackService()
         syncPlaybackState()
@@ -871,6 +893,7 @@ class ReaderActivity : AppCompatActivity() {
                 ttsPaused = false
                 binding.readerView.clearHighlight()
                 updateTtsPanel()
+                updatePageTurnLockIndicator()
                 stopTtsPlaybackService()
                 toast(e.message ?: getString(R.string.tts_start_failed))
             }
@@ -1148,6 +1171,7 @@ class ReaderActivity : AppCompatActivity() {
         tts.stop()
         binding.readerView.clearHighlight()
         updateTtsPanel()
+        updatePageTurnLockIndicator()
         stopTtsPlaybackService()
     }
 
@@ -1701,6 +1725,9 @@ class ReaderActivity : AppCompatActivity() {
 
         /** 翻页后增量保存位置的去抖间隔 */
         private const val POSITION_PERSIST_DEBOUNCE_MS = 150L
+
+        /** 状态栏定时轮询间隔：兜底读取电量并顺带刷新时间 */
+        private const val STATUS_POLL_INTERVAL_MS = 15_000L
 
         /** 每本书当前处于前台的阅读器实例；用于阻止重复实例用旧位置写库 */
         private val activeReaders = ConcurrentHashMap<Long, WeakReference<ReaderActivity>>()

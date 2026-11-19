@@ -60,6 +60,10 @@ class ReaderView @JvmOverloads constructor(
     /** 当前朗读高亮范围（章节内字符偏移，-1 表示无高亮） */
     private var highlightStart: Int = -1
     private var highlightEnd: Int = -1
+
+    /** 是否正在锁定手动翻页（朗读中且开启对应设置） */
+    private var pageTurnLocked: Boolean = false
+
     private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val highlightPath = Path()
 
@@ -78,6 +82,7 @@ class ReaderView @JvmOverloads constructor(
         )
         textAlign = Paint.Align.RIGHT
     }
+    private val lockPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics
@@ -132,6 +137,13 @@ class ReaderView @JvmOverloads constructor(
         if (statusTime == time && this.batteryPercent == batteryPercent) return
         statusTime = time
         this.batteryPercent = batteryPercent
+        invalidate()
+    }
+
+    /** 手动翻页锁定状态：在阅读进度左侧显示小锁图标 */
+    fun setPageTurnLocked(locked: Boolean) {
+        if (pageTurnLocked == locked) return
+        pageTurnLocked = locked
         invalidate()
     }
 
@@ -287,11 +299,47 @@ class ReaderView @JvmOverloads constructor(
         }
 
         if (progressText.isNotEmpty()) {
+            val progressRight = (width - paddingRight).toFloat()
             val progressBaseline = height - footerBand + progressPaint.textSize + 6f
-            canvas.drawText(
-                progressText, (width - paddingRight).toFloat(), progressBaseline, progressPaint
-            )
+            canvas.drawText(progressText, progressRight, progressBaseline, progressPaint)
+            if (pageTurnLocked) {
+                val textLeft = progressRight - progressPaint.measureText(progressText)
+                val iconSize = progressPaint.textSize * 0.95f
+                val iconLeft = textLeft - dp(5f) - iconSize
+                val centerY = progressBaseline - progressPaint.textSize * 0.35f
+                drawLock(canvas, iconLeft, centerY, iconSize)
+            }
         }
+    }
+
+    /** 绘制进度左侧的小锁图标：锁梁 + 锁体 */
+    private fun drawLock(canvas: Canvas, left: Float, centerY: Float, size: Float) {
+        lockPaint.color = progressPaint.color
+
+        val bodyWidth = size * 0.75f
+        val bodyHeight = size * 0.48f
+        val bodyLeft = left + (size - bodyWidth) / 2f
+        val bodyTop = centerY - size * 0.1f
+        val bodyBottom = bodyTop + bodyHeight
+        val radius = size * 0.12f
+        lockPaint.style = Paint.Style.FILL
+        canvas.drawRoundRect(
+            bodyLeft, bodyTop, bodyLeft + bodyWidth, bodyBottom,
+            radius, radius, lockPaint
+        )
+
+        val shackleWidth = size * 0.5f
+        val shackleHeight = size * 0.44f
+        val shackleLeft = left + (size - shackleWidth) / 2f
+        val shackleRect = RectF(
+            shackleLeft,
+            bodyTop - shackleHeight,
+            shackleLeft + shackleWidth,
+            bodyTop + shackleHeight
+        )
+        lockPaint.style = Paint.Style.STROKE
+        lockPaint.strokeWidth = (size * 0.14f).coerceAtLeast(dp(1f))
+        canvas.drawArc(shackleRect, 180f, 180f, false, lockPaint)
     }
 
     /** 绘制右上角电池图标：外框 + 右侧电极 + 按百分比填充 */
